@@ -1,0 +1,18 @@
+[package]
+name = "ml-adapters"
+description = "mandate-ledger adapters: cart normalizers and rails"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ml-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+hex.workspace = true
+ed25519-dalek.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
