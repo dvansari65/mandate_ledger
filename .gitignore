@@ -1,0 +1,5 @@
+/target
+/bindings/node/node_modules
+/bindings/node/*.node
+/bindings/wasm/pkg
+.DS_Store
