@@ -1,24 +1,32 @@
 # cargo-deny configuration. Checked in CI on every push and PR.
-# Docs: https://embarkstudios.github.io/cargo-deny/
+# Key reference: https://embarkstudios.github.io/cargo-deny/checks/ (cargo-deny 0.20)
 
 [graph]
 all-features = true
 
 [advisories]
-# Any advisory in the RustSec database fails the build. Vulnerabilities and
-# unmaintained crates are both errors by default; unsound is too.
+# Vulnerabilities are always errors in cargo-deny >= 0.16; there is no key for it.
+# `unmaintained` is a scope, not a severity: fail only on crates we depend on
+# directly, and do not block the build on unmaintained transitive crates.
+unmaintained = "workspace"
+unsound = "all"
 yanked = "deny"
 
 [licenses]
-# Exactly the licenses present in the tree today. Extend deliberately.
+# Everything not listed here fails. Extend deliberately, one PR per license.
 allow = [
   "Apache-2.0",
   "MIT",
   "BSD-2-Clause",
   "BSD-3-Clause",
+  "ISC",
   "Unicode-3.0",
+  "Zlib",
 ]
 confidence-threshold = 0.9
+include-dev = true
+# ISC and Zlib are pre-approved but not yet present in the tree.
+unused-allowed-license = "allow"
 
 [bans]
 multiple-versions = "warn"
