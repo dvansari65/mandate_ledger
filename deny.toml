@@ -1,0 +1,31 @@
+# cargo-deny configuration. Checked in CI on every push and PR.
+# Docs: https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+all-features = true
+
+[advisories]
+# Any advisory in the RustSec database fails the build. Vulnerabilities and
+# unmaintained crates are both errors by default; unsound is too.
+yanked = "deny"
+
+[licenses]
+# Exactly the licenses present in the tree today. Extend deliberately.
+allow = [
+  "Apache-2.0",
+  "MIT",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "Unicode-3.0",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

@@ -1,5 +1,7 @@
 # mandate-ledger
 
+[![CI](https://github.com/dvansari65/mandate_ledger/actions/workflows/ci.yml/badge.svg)](https://github.com/dvansari65/mandate_ledger/actions/workflows/ci.yml)
+
 **An enforcement layer for agent-driven payments.** It does not move money.
 It decides whether each step of a payment — authorize → pay → settle →
 deliver — is consistent, bounded, and final, and records a hash-chained
