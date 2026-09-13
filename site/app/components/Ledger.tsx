@@ -1,5 +1,6 @@
 "use client";
 
+import { motion } from "motion/react";
 import { useEffect, useState } from "react";
 
 type Stage = "authorized" | "paid" | "settled" | "delivered";
@@ -76,9 +77,8 @@ export default function Ledger() {
   const chipState = (s: Stage) => (reached(s) ? "on" : pending && s === "settled" ? "wait" : "off");
 
   return (
-    <div className="window ledger-window">
-      <div className="window-bar">
-        <span className="dots" aria-hidden="true"><i /><i /><i /></span>
+    <div className="frame ledger-frame">
+      <div className="frame-head">
         <span>ledger · mnd_8f2a · mock rail</span>
         <button className="replay" onClick={() => setRun((n) => n + 1)} disabled={!done}>Replay</button>
       </div>
@@ -106,13 +106,13 @@ export default function Ledger() {
           </div>
         )}
         {rows.map((r) => (
-          <div key={r.seq} className="row" role="row" data-kind={r.kind}>
+          <motion.div key={r.seq} className="row" role="row" data-kind={r.kind} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45, ease: [0.2, 0.7, 0.2, 1] }}>
             <span className="seq">{r.seq}</span>
             <span className="ctx">{r.ctx}</span>
             <span className="event">{r.event}</span>
             <span className="detail">{r.code ? <><code>{r.code}</code> · {r.detail}</> : r.detail}</span>
             <span className="hash" title={`sha256:${r.hash}`}>sha256:{r.hash.slice(0, 18)}…</span>
-          </div>
+          </motion.div>
         ))}
       </div>
     </div>

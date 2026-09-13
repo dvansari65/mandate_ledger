@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import Icon from "./Icon";
 
 export default function CopyChip({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -15,11 +14,9 @@ export default function CopyChip({ text }: { text: string }) {
     }
   };
   return (
-    <button type="button" className="chip" onClick={copy} aria-live="polite">
-      <span className="chip-prompt">$</span>
+    <button type="button" className="chip" onClick={copy}>
       <code>{text}</code>
-      <span className="chip-icon">{copied ? <Icon name="check" size={15} /> : <Icon name="copy" size={15} />}</span>
-      <span className="sr-only">{copied ? "Copied" : "Copy to clipboard"}</span>
+      <span className="chip-action" aria-live="polite">{copied ? "copied" : "copy"}</span>
     </button>
   );
 }

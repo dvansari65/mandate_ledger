@@ -1,9 +1,8 @@
 import type { Metadata } from "next";
-import { Bricolage_Grotesque, Instrument_Sans, JetBrains_Mono } from "next/font/google";
+import { Instrument_Sans, Instrument_Serif, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
-// `wdth` gives the condensed display setting; `opsz` was dropped — it doubled the file for no visible gain at these sizes.
-const display = Bricolage_Grotesque({ subsets: ["latin"], axes: ["wdth"], variable: "--font-display", display: "swap" });
+const display = Instrument_Serif({ subsets: ["latin"], weight: "400", style: ["normal", "italic"], variable: "--font-display", display: "swap" });
 const body = Instrument_Sans({ subsets: ["latin"], variable: "--font-body", display: "swap" });
 const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono", display: "swap" });
 
