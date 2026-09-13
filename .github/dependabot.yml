@@ -20,3 +20,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # `dtolnay/rust-toolchain@1.85.0` is our MSRV pin, not an action version.
+      # Dependabot reads it as a semver tag and proposes non-existent toolchains.
+      # It changes only together with `rust-version` in Cargo.toml, by hand.
+      - dependency-name: dtolnay/rust-toolchain
