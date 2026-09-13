@@ -103,6 +103,7 @@ crates/ml-core       engine: types, mandate/scope, state machine, store trait, l
 crates/ml-adapters   NativeCartAdapter, MockRail
 crates/ml-verify     lifecycle, denial, concurrency, tamper, and property tests
 examples/quickstart  runnable end-to-end
+site/                landing page (Next.js + TypeScript) — `pnpm --dir site dev`
 docs/threat-model.md what is prevented, bounded, and out of scope
 docs/integration.md  how a merchant, PSP, or wallet wires this in
 ```
