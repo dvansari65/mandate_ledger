@@ -19,12 +19,12 @@ ml-adapters = { path = "crates/ml-adapters", version = "0.0.1" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-serde_jcs = "0.1"
+serde_jcs = "0.2"
 rust_decimal = { version = "1", features = ["serde"] }
-sha2 = "0.10"
+sha2 = "0.11"
 hex = { version = "0.4", features = ["serde"] }
-base64 = "0.22"
-ed25519-dalek = "2"
+base64 = "0.23"
+ed25519-dalek = "3"
 thiserror = "2"
 proptest = "1"
 
