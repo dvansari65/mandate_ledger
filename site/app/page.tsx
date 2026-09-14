@@ -1,25 +1,31 @@
-import Architecture from "./components/Architecture";
-import CopyChip from "./components/CopyChip";
-import Ledger from "./components/Ledger";
+import Diagram from "./components/Diagram";
 import Reveal from "./components/Reveal";
 
 const REPO = "https://github.com/dvansari65/mandate_ledger";
 const DOCS = `${REPO}/blob/main/docs`;
+const PAPER = "https://arxiv.org/abs/2609.00060";
+
+/** Three ledger lines; the last one short, with a mark where the refusal goes. */
+const Mark = () => (
+  <svg viewBox="0 0 32 32" aria-hidden="true">
+    <rect width="32" height="32" rx="8" className="mark-plate" />
+    <rect x="7" y="9" width="18" height="2.4" rx="1.2" className="mark-line" />
+    <rect x="7" y="14.8" width="18" height="2.4" rx="1.2" className="mark-line" />
+    <rect x="7" y="20.6" width="10" height="2.4" rx="1.2" className="mark-line" />
+    <rect x="20" y="19.6" width="5" height="5" rx="1.4" className="mark-dot" />
+  </svg>
+);
 
 export default function Page() {
   return (
     <>
       <header className="nav-wrap">
         <div className="wrap nav">
-          <a href="#" className="brand">
-            <svg viewBox="0 0 32 32" width="20" height="20" aria-hidden="true"><rect width="32" height="32" rx="9" fill="currentColor" /><rect x="8" y="10" width="16" height="2.4" rx="1.2" fill="#FFF2F2" /><rect x="8" y="15" width="16" height="2.4" rx="1.2" fill="#FFF2F2" /><rect x="8" y="20" width="9" height="2.4" rx="1.2" fill="#FFF2F2" /><rect x="20" y="19.5" width="4" height="4" rx="1.2" fill="#FF788D" /></svg>
-            mandate-ledger
-          </a>
-          <nav className="pill-nav" aria-label="Sections">
-            <a href="#architecture">Where it sits</a>
-            <a href="#failures">What breaks</a>
-            <a href="#calls">The API</a>
-            <a href="#who">Integrate</a>
+          <a href="#" className="brand"><Mark />mandate-ledger</a>
+          <nav className="links" aria-label="Sections">
+            <a href="#how">How it works</a>
+            <a href="#faq">FAQ</a>
+            <a href={`${DOCS}/integration.md`}>Docs</a>
           </nav>
           <a className="btn sm" href={REPO}>GitHub</a>
         </div>
@@ -27,162 +33,105 @@ export default function Page() {
 
       <main>
         <section className="wrap hero">
-          <div className="hero-copy rise">
-            <span className="tag">Enforcement layer for agent payments · Rust · Apache-2.0</span>
-            <h1>Five checks that <em>never talk</em> to each other.</h1>
-            <p className="lede">
-              An agent’s payment is verified by five parties, none of which checks the others. mandate-ledger sits
-              between them — it refuses the step when they disagree, and writes down why.
+          <div className="hero-copy">
+            <span className="tag rise">Enforcement layer for agent-driven payments</span>
+            <h1 className="rise" style={{ animationDelay: "80ms" }}>The agent can spend. The ledger decides whether it <em>may</em>.</h1>
+            <p className="lede rise" style={{ animationDelay: "160ms" }}>
+              It sits between the agent and the payment rail, refuses any step where the mandate, the cart, the payment
+              and the settlement disagree, and keeps the record. It never moves money.
             </p>
-            <div className="actions">
+            <div className="actions rise" style={{ animationDelay: "240ms" }}>
               <a className="btn" href={`${DOCS}/integration.md`}>Get started</a>
-              <a className="btn outline" href={REPO}>Read the code</a>
+              <a className="link" href={REPO}>View on GitHub →</a>
             </div>
-            <CopyChip text={`cargo add ml-core --git ${REPO}`} />
           </div>
-          <div className="rise" style={{ animationDelay: "150ms" }}><Ledger /></div>
-          <div className="rise" style={{ animationDelay: "280ms" }}>
-            <dl className="stats">
-              <div><dt>48</dt><dd>tests</dd></div>
-              <div><dt>6,000</dt><dd>property cases on the scope lattice</dd></div>
-              <div><dt>10<span>/16</span></dt><dd>threads pass against one ₹1,000 budget — exactly</dd></div>
-              <div><dt>0</dt><dd>unsafe blocks</dd></div>
-            </dl>
-          </div>
+          <div className="rise" style={{ animationDelay: "200ms" }}><Diagram /></div>
         </section>
 
-        <section className="band" id="architecture">
+        <section className="wrap proof" aria-label="Trust">
+          <ul>
+            <li><b>Open source</b> Apache-2.0</li>
+            <li><b>48</b> tests</li>
+            <li><b>6,000</b> property cases</li>
+            <li><b>0</b> unsafe code</li>
+            <li>Built on the <a href={PAPER}>formal analysis</a> of x402, AP2, ACP and MPP</li>
+          </ul>
+        </section>
+
+        <section className="band" id="problem">
           <div className="wrap">
             <Reveal className="head">
-              <span className="kicker">Where it sits</span>
-              <h2>Between the agent and the money. Never holding either.</h2>
-              <p>Inputs come in from the wallet and the agent. Proofs come up from the rail. The ledger decides, records, and hands the merchant a token it can’t forge.</p>
+              <span className="kicker">The problem</span>
+              <h2>An agent’s payment is checked five times. Never once <em>against each other</em>.</h2>
             </Reveal>
-            <Reveal delay={0.1}><div className="canvas"><Architecture /></div></Reveal>
-            <Reveal delay={0.15}>
-              <div className="trio">
-                <div><h3>Gate</h3><p>Signature and signer trust, then scope, then budget — the last one atomic with the write, so two parallel requests can’t both squeeze through.</p></div>
-                <div><h3>Lifecycle</h3><p>Each stage is a token the next one requires. Wrong order doesn’t compile. Every transition, and every refusal, is appended to the hash chain.</p></div>
-                <div><h3>Rail</h3><p>The rail says what “final” means — captured, N confirmations. The ledger waits for it; the merchant is never shown anything before Settled.</p></div>
+            <Reveal delay={80}>
+              <div className="three">
+                <div><h3>The wrong cart gets paid</h3><p>You approved ₹470. A hostile page turns it into ₹4,700 somewhere else. Every signature still looks valid.</p></div>
+                <div><h3>A retry charges twice</h3><p>The response is lost, the agent tries again, the merchant charges again.</p></div>
+                <div><h3>Goods ship before the money is final</h3><p>A pending payment looks paid. Then it reverts — and the goods are gone.</p></div>
               </div>
             </Reveal>
           </div>
         </section>
 
-        <section className="wrap section" id="failures">
+        <section className="wrap section" id="features">
           <Reveal className="head">
-            <span className="kicker">What goes wrong today</span>
-            <h2>Every step is locally valid. Nobody checks that they refer to the same payment.</h2>
-            <p>The same five failures show up across x402, MPP, AP2 and ACP — the primitive exists, the caller can skip it. Each one becomes a refusal here.</p>
+            <span className="kicker">What you get</span>
+            <h2>One layer that makes every check <em>agree</em>.</h2>
           </Reveal>
-          <Reveal delay={0.1}>
-            <ol className="cards">
-              <li><h3>The wrong cart gets paid</h3><p>You approved ₹470 at one store. A bug or a hostile page turns it into ₹4,700 somewhere else. Every signature still verifies.</p><code className="deny">CART_BINDING_MISMATCH</code></li>
-              <li><h3>A retry charges twice</h3><p>The response is lost, the agent tries again, the merchant processes it again. Two charges, one refund ticket.</p><code className="ok">same context · one charge</code></li>
-              <li><h3>Goods ship before the money is final</h3><p>The merchant sees a pending payment and delivers. The payment is dropped or reorganised away. Fifteen of fifteen x402 facilitators tested had this gap.</p><code className="ok">deliver requires Settled</code></li>
-              <li><h3>There is no stop button</h3><p>You granted ₹8,000 a month. On day three you change your mind. AP2 has no in-protocol revocation — the mandate lives until it expires.</p><code className="deny">MANDATE_REVOKED</code></li>
-              <li><h3>Parallel work overspends</h3><p>Three sub-tasks each read “₹8,000 left” in the same instant. Each spends it. Here the budget is reserved inside the store’s append, so only one gets through.</p><code className="deny">SCOPE_TOTAL_EXCEEDED</code></li>
-              <li className="cite"><p>Forty issues of this shape across the four protocols.</p><a href="https://arxiv.org/abs/2609.00060">A Formal Analysis of Agent Payment Protocols — arXiv 2609.00060 →</a></li>
-            </ol>
+          <Reveal delay={80}>
+            <div className="four">
+              <div><h3>Refuses when the pieces disagree</h3><p>Mandate, cart, payment and settlement are bound to each other. If any one doesn’t match, the step doesn’t happen.</p></div>
+              <div><h3>Budgets that hold under load</h3><p>Limits are reserved the moment a purchase is approved, so parallel agents can’t overspend — and a mandate can be revoked at any time.</p></div>
+              <div><h3>Delivery only after the money is final</h3><p>A merchant can’t ship on a pending payment. Not by policy — the path doesn’t exist.</p></div>
+              <div><h3>A record you can hand to anyone</h3><p>Every decision, including every refusal, is chained and verifiable without your database. Disputes come with evidence.</p></div>
+            </div>
           </Reveal>
         </section>
 
-        <section className="band" id="calls">
-          <div className="wrap two">
-            <Reveal>
-              <span className="kicker">The API</span>
-              <h2>Five calls. Each returns the token the next requires.</h2>
-              <p>Call them out of order and it doesn’t compile. Call them across requests and <code>resume(ctx)</code> hands the token back.</p>
+        <section className="band" id="how">
+          <div className="wrap">
+            <Reveal className="head">
+              <span className="kicker">How it works</span>
+              <h2>Three steps, always in <em>order</em>.</h2>
+            </Reveal>
+            <Reveal delay={80}>
               <ol className="steps">
-                <li><b>authorize</b><span>Signature, trust, revocation, scope, cap, velocity, budget. Reserves the amount.</span></li>
-                <li><b>record_payment</b><span>Amount must match. Proof must bind to this context or this cart. Nonce is consumed once, for everyone.</span></li>
-                <li><b>record_settlement</b><span>Final, pending, or failed — the rail decides. Failure releases the budget.</span></li>
-                <li><b>record_delivery</b><span>Accepts only a <code>Settled</code>. There is no other way to make one.</span></li>
-                <li><b>evidence</b><span>The whole chain, refusals included. Verifiable without your database.</span></li>
+                <li><span className="num">1</span><h3>Grant</h3><p>The user sets limits once — which merchants, how much, for how long. The mandate is signed, and can be revoked.</p></li>
+                <li><span className="num">2</span><h3>Check</h3><p>Every step of the payment is checked against the mandate and the step before it. Budget is reserved before any money moves.</p></li>
+                <li><span className="num">3</span><h3>Record</h3><p>When everything agrees, the money moves and the merchant is told. Every decision is written to a tamper-evident ledger.</p></li>
               </ol>
             </Reveal>
-            <Reveal delay={0.1}>
-              <pre className="code"><code><span className="k">let</span> auth    = ledger.authorize(&amp;mandate, &amp;cart, <span className="s">"order-1"</span>)?;{`
-`}<span className="k">let</span> paid    = ledger.record_payment(&amp;auth, &amp;proof)?;{`
-`}<span className="k">let</span> settled = <span className="k">match</span> ledger.record_settlement(&amp;paid, &amp;finality)? {"{"}{`
-`}    Settlement::Settled(s)   =&gt; s,{`
-`}    Settlement::Pending {"{ .. }"} =&gt; <span className="k">return</span> retry_later(),{`
-`}    Settlement::Failed(f)    =&gt; <span className="k">return</span> ledger.compensate(&amp;f, None),{`
-`}{"}"};{`
-`}ledger.record_delivery(&amp;settled, receipt)?;{`
-`}<span className="k">let</span> bundle  = ledger.evidence(auth.ctx())?;   <span className="c">// self-verifying</span></code></pre>
-            </Reveal>
           </div>
         </section>
 
-        <section className="wrap section" id="enforced">
+        <section className="wrap section" id="faq">
           <Reveal className="head">
-            <span className="kicker">Enforced three times</span>
-            <h2>The same rule at the type level, in the engine, and in the store.</h2>
-            <p>A guarantee that lives in one place is a policy. One that lives in three is a property.</p>
+            <span className="kicker">Questions</span>
+            <h2>Before you <em>read the code</em>.</h2>
           </Reveal>
-          <div className="two">
-            <Reveal>
-              <div className="trio stack">
-                <div><h3>Types</h3><p><code>record_delivery</code> takes a <code>Settled</code>. Passing a <code>Paid</code> is a compile error.</p></div>
-                <div><h3>Engine</h3><p>Every call re-reads the stored state before it acts. Tokens are proofs, not permissions.</p></div>
-                <div><h3>Store</h3><p><code>append</code> rejects any transition the machine doesn’t allow — even a hand-built event.</p></div>
-              </div>
-            </Reveal>
-            <Reveal delay={0.1}>
-              <pre className="code"><code><span className="c">// A merchant tries to ship on a pending payment.</span>{`
-`}<span className="k">let</span> paid = ledger.record_payment(&amp;auth, &amp;proof)?;{`
-`}ledger.record_delivery(&amp;paid, receipt)?;{`
-
-`}<span className="e">error[E0308]</span>: mismatched types{`
-`}   <span className="c">--&gt; checkout.rs:42:28</span>{`
-`}    | ledger.record_delivery(&amp;paid, receipt)?;{`
-`}    |                        <span className="e">^^^^^</span> expected `&amp;Settled`, found `&amp;Paid`</code></pre>
-            </Reveal>
-          </div>
-        </section>
-
-        <section className="band" id="who">
-          <div className="wrap">
-            <Reveal className="head">
-              <span className="kicker">Who plugs in</span>
-              <h2>Nobody rewrites their payment code. They add two gates to it.</h2>
-            </Reveal>
-            <Reveal delay={0.1}>
-              <div className="quad">
-                <div><h3>Agents</h3><p>A hard cap on what the model can spend, whatever it decides. Prompt injection can still try; it can’t get past authorize.</p><span className="writes">one authorize call</span></div>
-                <div><h3>Merchants</h3><p>Never ship or return data before the money is final. Never charged twice by a retry.</p><span className="writes">a CartAdapter; fulfilment gated on Settled</span></div>
-                <div><h3>Payment gateways</h3><p>One lifecycle across every rail. Webhooks resume the context. Every agent payment leaves a dispute-ready record.</p><span className="writes">one Rail adapter per rail</span></div>
-                <div><h3>Wallets</h3><p>Customers set limits, watch the budget drain, and hit stop. “The agent did it” disputes come with evidence.</p><span className="writes">mandate signing, revoke, attenuate</span></div>
-              </div>
-            </Reveal>
-          </div>
-        </section>
-
-        <section className="wrap section" id="scope">
-          <Reveal className="head">
-            <span className="kicker">Honest scope</span>
-            <h2>What it refuses to guess.</h2>
-            <p>A scope the cart can’t satisfy is a refusal, not a pass. And some problems belong to other layers.</p>
-          </Reveal>
-          <Reveal delay={0.1}>
-            <div className="scope">
-              <ul className="yes" aria-label="Covered">
-                <li>Cart approved ≠ cart paid</li>
-                <li>Double charge on retry, nonce reuse across contexts</li>
-                <li>Release before finality; no rollback after failed settlement</li>
-                <li>Out-of-scope merchant, category, amount, currency, velocity</li>
-                <li>Revoked, expired, forged, or untrusted mandates</li>
-                <li>Budget races under concurrency</li>
-                <li>Tampered or truncated evidence</li>
-              </ul>
-              <ul className="no" aria-label="Not covered">
-                <li>Detecting prompt injection itself — only bounding its effect</li>
-                <li>Agent identity — that’s Visa TAP, Mastercard Agent Pay, Tenuo</li>
-                <li>Counterfeit storefronts inside an allowed scope</li>
-                <li>Merchant non-delivery after settlement — needs escrow</li>
-                <li>Chain-level asset theft, gas abuse</li>
-              </ul>
+          <Reveal delay={80}>
+            <div className="faq">
+              <details open>
+                <summary>Does it move money?</summary>
+                <p>No. It decides whether each step may proceed and records the decision. Your payment provider or chain moves the money.</p>
+              </details>
+              <details>
+                <summary>What does it not do?</summary>
+                <p>It doesn’t detect prompt injection, verify who an agent is, or protect you from a fraudulent merchant that sits inside an allowed scope. Those belong to other layers — the <a href={`${DOCS}/threat-model.md`}>threat model</a> says exactly which.</p>
+              </details>
+              <details>
+                <summary>Which protocols does it work with?</summary>
+                <p>It’s built against the formal analysis of x402, AP2, ACP and MPP. The core is protocol-agnostic; adapters for each are next.</p>
+              </details>
+              <details>
+                <summary>Is it ready for production?</summary>
+                <p>Not yet. The core engine is complete and tested. Protocol adapters, a SQL store and an external audit are in progress. Don’t put money behind it yet.</p>
+              </details>
+              <details>
+                <summary>How do I plug it in?</summary>
+                <p>Three small pieces — one for your cart format, one for your payment rail, one for storage — with in-memory versions to start. The <a href={`${DOCS}/integration.md`}>integration guide</a> walks through it.</p>
+              </details>
             </div>
           </Reveal>
         </section>
@@ -190,20 +139,27 @@ export default function Page() {
         <section className="close">
           <div className="wrap">
             <Reveal>
-              <h2>Put a gate in front of the money.</h2>
-              <p>Core engine complete and tested. Protocol adapters and a SQL store are next. Read it, break it, tell us — and don’t put money behind it yet.</p>
+              <h2>Put a gate in front of the <em>money</em>.</h2>
+              <p>Read it, break it, tell us.</p>
               <div className="actions">
-                <a className="btn light" href={REPO}>Read the code</a>
-                <a className="btn ghost" href={`${DOCS}/threat-model.md`}>Threat model</a>
+                <a className="btn dark" href={`${DOCS}/integration.md`}>Get started</a>
+                <a className="link inv" href={`${DOCS}/threat-model.md`}>Read the threat model →</a>
               </div>
+              <small>0.0.1 — core engine complete and tested. Not for production money yet.</small>
             </Reveal>
           </div>
         </section>
       </main>
 
       <footer className="wrap footer">
-        <span>mandate-ledger · 0.0.1 · Apache-2.0</span>
-        <span><a href={REPO}>GitHub</a> · <a href={`${DOCS}/integration.md`}>Integration guide</a> · <a href="https://arxiv.org/abs/2609.00060">Formal analysis</a></span>
+        <span className="brand"><Mark />mandate-ledger</span>
+        <nav aria-label="Footer">
+          <a href={REPO}>GitHub</a>
+          <a href={`${DOCS}/integration.md`}>Docs</a>
+          <a href={`${DOCS}/threat-model.md`}>Threat model</a>
+          <a href={`${REPO}/blob/main/LICENSE`}>License</a>
+        </nav>
+        <span className="copy">© 2026 mandate-ledger contributors · Apache-2.0</span>
       </footer>
     </>
   );
