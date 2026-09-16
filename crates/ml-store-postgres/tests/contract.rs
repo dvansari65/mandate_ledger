@@ -238,3 +238,43 @@ fn denials_are_recorded_against_their_context() {
         }
     ));
 }
+
+#[test]
+fn migrate_on_a_live_database_never_deadlocks_with_appends() {
+    let f = pg_or_skip!("migrate-live");
+    let scope = Scope {
+        max_total: None,
+        velocity: None,
+        ..f.scope()
+    };
+    let m = f.mandate_with(scope);
+    let cart = f.cart("1.00");
+    // One extra pool for every booting replica to share; a pool per thread
+    // would exhaust the server's connection limit under `cargo test`.
+    let booting = f.reconnect();
+
+    // Half the threads are a service under load; the other half are replicas
+    // calling migrate() on boot against a database that is already migrated.
+    // Neither side may ever be the victim of a 40P01.
+    thread::scope(|s| {
+        for t in 0..4 {
+            let ledger = f.ledger();
+            let (m, c) = (&m, &cart);
+            s.spawn(move || {
+                for i in 0..40 {
+                    ledger.authorize(m, c, &format!("t{t}-{i}")).unwrap();
+                }
+            });
+        }
+        for _ in 0..4 {
+            let store = std::sync::Arc::clone(&booting);
+            s.spawn(move || {
+                for _ in 0..40 {
+                    store
+                        .migrate()
+                        .expect("a re-run of migrate must not deadlock against appends");
+                }
+            });
+        }
+    });
+}

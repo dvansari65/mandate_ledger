@@ -23,6 +23,11 @@ pub type PgPool = Pool<PostgresConnectionManager<NoTls>>;
 
 /// Held for the whole of `migrate`, so concurrent boots serialize.
 const LOCK_MIGRATE: i32 = 0;
+
+/// The schema, as an ordered list of migrations. `ml_schema` records which
+/// of them a database has applied, and [`PostgresStore::migrate`] runs only
+/// the rest — on a database that is already current, nothing at all.
+const MIGRATIONS: [&str; 1] = [include_str!("migrations/0001_initial.sql")];
 /// Serializes appends to one context, so the chain and the state advance
 /// one step at a time.
 const LOCK_CONTEXT: i32 = 1;
@@ -67,19 +72,71 @@ impl PostgresStore {
         &self.pool
     }
 
-    /// Create the schema if it is not already present. Safe to call on boot.
+    /// Bring the schema up to date. Safe to call on every boot.
     ///
-    /// `CREATE TABLE IF NOT EXISTS` is *not* safe to run concurrently — two
-    /// callers race in the system catalogs and one fails on a duplicate
-    /// relation. An advisory lock serializes them, so every instance of a
-    /// replicated service can call this on startup.
+    /// Runs under an advisory lock, so replicas booting together serialize:
+    /// `CREATE TABLE` is not safe to run concurrently, and two callers would
+    /// otherwise race in the system catalogs.
+    ///
+    /// On a database that is already current this issues no DDL, and that
+    /// matters. `CREATE INDEX IF NOT EXISTS` takes a `SHARE` lock on its
+    /// table before it looks for the index, and a transaction keeps every
+    /// lock until it ends — so re-running the whole schema would hold
+    /// `ml_events` while waiting on `ml_contexts`, the mirror image of an
+    /// `append` in flight, which holds `ml_contexts` while waiting on
+    /// `ml_events`. PostgreSQL resolves that deadlock by killing one side:
+    /// either the boot fails or a live payment does. Reading the version
+    /// first takes only `ACCESS SHARE`, which conflicts with nothing an
+    /// append does.
+    ///
+    /// Fails if the database is at a version newer than this build knows,
+    /// rather than run against a schema it has never seen.
     pub fn migrate(&self) -> Result<(), StoreError> {
         let mut conn = self.pool.get().map_err(backend)?;
         let mut tx = conn.transaction().map_err(pg)?;
         tx.query("SELECT pg_advisory_xact_lock($1, 0)", &[&LOCK_MIGRATE])
             .map_err(pg)?;
-        tx.batch_execute(include_str!("schema.sql")).map_err(pg)?;
+
+        let applied = Self::applied_migrations(&mut tx)?;
+        if applied > MIGRATIONS.len() {
+            return Err(backend(format!(
+                "database schema is at version {applied}, newer than this build's {}",
+                MIGRATIONS.len()
+            )));
+        }
+        for (version, sql) in (1_i32..).zip(MIGRATIONS).skip(applied) {
+            tx.batch_execute(sql).map_err(pg)?;
+            tx.execute("INSERT INTO ml_schema (version) VALUES ($1)", &[&version])
+                .map_err(pg)?;
+        }
         tx.commit().map_err(pg)
+    }
+
+    /// How many migrations this database has applied. A fresh database has
+    /// none, and gets the version table itself — the one piece of DDL that
+    /// is not a migration.
+    fn applied_migrations(client: &mut impl GenericClient) -> Result<usize, StoreError> {
+        let exists: bool = client
+            .query_one("SELECT to_regclass('ml_schema') IS NOT NULL", &[])
+            .map_err(pg)?
+            .try_get(0)
+            .map_err(pg)?;
+        if !exists {
+            client
+                .batch_execute(
+                    "CREATE TABLE ml_schema (\
+                         version    INTEGER PRIMARY KEY, \
+                         applied_at TIMESTAMPTZ NOT NULL DEFAULT now())",
+                )
+                .map_err(pg)?;
+            return Ok(0);
+        }
+        let version: i32 = client
+            .query_one("SELECT coalesce(max(version), 0) FROM ml_schema", &[])
+            .map_err(pg)?
+            .try_get(0)
+            .map_err(pg)?;
+        usize::try_from(version).map_err(corrupt)
     }
 
     /// Delete every row this store owns.
