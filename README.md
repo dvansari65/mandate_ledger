@@ -94,7 +94,7 @@ Three traits, all small:
 
 - **`CartAdapter`** — wire format → `Cart { hash, claims, attestation }`. Ships: `NativeCartAdapter` (plain JSON, optional merchant signature).
 - **`Rail`** — verify a proof, report finality. Ships: `MockRail`. Real rails (x402, PSP webhooks) are next.
-- **`Store`** — records + hash-chained events; must apply side effects atomically on append. Ships: `MemoryStore`. SQL backends are next.
+- **`Store`** — records + hash-chained events; must apply side effects atomically on append. Ships: `MemoryStore` for tests, `PostgresStore` (`ml-store-postgres`) for anything durable.
 
 Plus **`SignerPolicy`** — which keys may sign mandates for which principal. Ships: `TrustedSigners` (static), `AcceptAnySigner` (tests only, insecure).
 
@@ -103,12 +103,38 @@ Plus **`SignerPolicy`** — which keys may sign mandates for which principal. Sh
 ```
 crates/ml-core       engine: types, mandate/scope, state machine, store trait, ledger, evidence
 crates/ml-adapters   NativeCartAdapter, MockRail
+crates/ml-store-postgres  durable PostgreSQL store
 crates/ml-verify     lifecycle, denial, concurrency, tamper, and property tests
 examples/quickstart  runnable end-to-end
 site/                landing page (Next.js + TypeScript) — `pnpm --dir site dev`
 docs/threat-model.md what is prevented, bounded, and out of scope
 docs/integration.md  how a merchant, PSP, or wallet wires this in
 ```
+
+## Persistence
+
+`MemoryStore` keeps everything in a `HashMap`, so a restart forgets the
+budget already reserved, which mandates were revoked, which payment nonces
+were spent, and the whole evidence chain. Every limit silently resets — an
+agent can spend its monthly cap again, a revoked mandate starts working, and
+a spent payment proof is accepted a second time.
+
+`ml-store-postgres` is what makes those four guarantees survive:
+
+```rust
+use ml_core::Store;
+use ml_store_postgres::PostgresStore;
+
+let store = PostgresStore::connect("postgres://localhost/mandate_ledger")?;
+store.migrate()?;                    // idempotent; safe on every boot
+let ledger = Ledger::new(store, rail, signers, SystemClock);
+```
+
+`append` is one transaction holding an advisory lock on the context — and,
+for an authorization, on the mandate too. The concurrency properties hold
+identically to the in-memory store: sixteen threads against one budget still
+yield exactly ten authorizations, and eight threads presenting one nonce
+still yield exactly one payment.
 
 ## Verify it yourself
 
@@ -119,6 +145,6 @@ cargo clippy --workspace --all-targets   # pedantic, zero warnings
 
 ## Status
 
-`0.0.1` — core engine complete and tested. Not yet: protocol adapters
-(x402, AP2, ACP, MPP), SQL store, TypeScript bindings, external audit.
+`0.0.1` — core engine and a durable PostgreSQL store, both tested. Not yet:
+protocol adapters (x402, AP2, ACP, MPP), TypeScript bindings, external audit.
 Do not put money behind it yet.

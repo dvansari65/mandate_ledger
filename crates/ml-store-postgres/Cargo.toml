@@ -1,0 +1,22 @@
+[package]
+name = "ml-store-postgres"
+description = "PostgreSQL-backed store for mandate-ledger"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ml-core.workspace = true
+postgres = { version = "0.19", features = ["with-serde_json-1"] }
+r2d2 = "0.8"
+r2d2_postgres = "0.18"
+rust_decimal = { workspace = true, features = ["db-postgres"] }
+serde_json.workspace = true
+
+[dev-dependencies]
+ml-adapters.workspace = true
+ed25519-dalek.workspace = true
+
+[lints]
+workspace = true
