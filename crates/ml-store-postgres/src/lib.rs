@@ -29,6 +29,13 @@
 //! sixteen threads against one budget still yield exactly ten authorizations,
 //! and eight threads presenting one nonce still yield exactly one payment.
 //!
+//! ## Migrations
+//!
+//! [`PostgresStore::migrate`] applies the schema as numbered migrations and
+//! records each one in `ml_schema`. On a database that is already current it
+//! issues no DDL at all, so a replica booting while others serve traffic
+//! never takes a table lock against an append in flight.
+//!
 //! ## Not yet
 //!
 //! Plaintext connections only via [`PostgresStore::connect`] — supply your own
