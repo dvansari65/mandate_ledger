@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 660" width="1200" height="660" role="img" aria-labelledby="t d">
+  <title id="t">Where mandate-ledger sits</title>
+  <desc id="d">A wallet grants a mandate and an agent builds a cart. Both enter the ledger, which checks signature, scope and budget, then moves the payment through authorized, paid, settled and delivered. Proof goes down to the payment rail and finality comes back. The merchant receives a settled token. Any disagreement is refused and recorded with the rest.</desc>
+  <style>
+    text { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; fill: #17160f; }
+    .t { font-size: 15px; font-weight: 700; }
+    .s { font-size: 12.5px; fill: #77736a; }
+    .k { font-size: 10.5px; letter-spacing: .2em; text-transform: uppercase; fill: #77736a; }
+    .l { font-size: 12px; fill: #77736a; }
+    .accent { fill: #1f3fd6; }
+    .box rect { fill: #fbfaf6; stroke: #bdb7a6; stroke-width: 1.25; }
+    .frame { fill: #ffffff; stroke: #1f3fd6; stroke-width: 1.5; }
+    .lines path { fill: none; stroke: #a9a391; stroke-width: 1.5; marker-end: url(#a); }
+    .gate { fill: #f4f1ea; stroke: #bdb7a6; stroke-width: 1.25; }
+    .gate-t { font-size: 12.5px; fill: #3f3d35; }
+    .ok { fill: #dcefe4; stroke: #1b6e48; stroke-width: 1.25; }
+    .ok-t { font-size: 12.5px; font-weight: 700; fill: #1b6e48; }
+    .rail { stroke: #1b6e48; stroke-width: 1.25; fill: none; opacity: .4; }
+    .note { fill: #f1ede3; stroke: #bdb7a6; stroke-width: 1; }
+    .deny { fill: #c4321c; }
+  </style>
+  <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 1L9 5L0 9z" fill="#a9a391"/></marker></defs>
+  <rect width="1200" height="660" rx="20" fill="#f4f1ea"/>
+
+  <rect class="frame" x="330" y="40" width="540" height="430" rx="18"/>
+  <text class="t accent" x="358" y="80">mandate-ledger</text>
+  <text class="s" x="842" y="80" text-anchor="end">never moves money</text>
+
+  <text class="k" x="358" y="124">checks</text>
+  <rect class="gate" x="358" y="138" width="128" height="36" rx="18"/><text class="gate-t" x="422" y="161" text-anchor="middle">signature</text>
+  <rect class="gate" x="498" y="138" width="102" height="36" rx="18"/><text class="gate-t" x="549" y="161" text-anchor="middle">scope</text>
+  <rect class="gate" x="612" y="138" width="110" height="36" rx="18"/><text class="gate-t" x="667" y="161" text-anchor="middle">budget</text>
+
+  <text class="k" x="358" y="234">lifecycle</text>
+  <path class="rail" d="M366 266H790"/>
+  <rect class="ok" x="358" y="248" width="118" height="36" rx="18"/><text class="ok-t" x="417" y="271" text-anchor="middle">authorized</text>
+  <rect class="ok" x="488" y="248" width="72" height="36" rx="18"/><text class="ok-t" x="524" y="271" text-anchor="middle">paid</text>
+  <rect class="ok" x="572" y="248" width="92" height="36" rx="18"/><text class="ok-t" x="618" y="271" text-anchor="middle">settled</text>
+  <rect class="ok" x="676" y="248" width="112" height="36" rx="18"/><text class="ok-t" x="732" y="271" text-anchor="middle">delivered</text>
+
+  <rect class="note" x="358" y="342" width="484" height="86" rx="12"/>
+  <circle class="deny" cx="384" cy="374" r="4.5"/>
+  <text class="s" x="400" y="379">Any disagreement — the step is refused,</text>
+  <text class="s" x="400" y="404">and the refusal is recorded with the rest.</text>
+
+  <g class="lines">
+    <path d="M250 153H312V145H330"/>
+    <path d="M250 420H286V161H330"/>
+    <path d="M870 266H948"/>
+    <path d="M546 470V556"/>
+    <path d="M654 556V470"/>
+  </g>
+  <text class="l" x="278" y="140" text-anchor="middle">mandate</text>
+  <text class="l" x="272" y="296" text-anchor="middle">cart</text>
+  <text class="l" x="909" y="252" text-anchor="middle">settled</text>
+  <text class="l" x="538" y="518" text-anchor="end">proof</text>
+  <text class="l" x="662" y="518">finality</text>
+  
+  <g class="box"><rect x="30" y="115" width="220" height="76" rx="12"/>
+    <text class="t" x="54" y="148">Wallet</text><text class="s" x="54" y="172">grants a mandate</text></g>
+  
+  <g class="box"><rect x="30" y="382" width="220" height="76" rx="12"/>
+    <text class="t" x="54" y="415">Agent</text><text class="s" x="54" y="439">builds a cart</text></g>
+  
+  <g class="box"><rect x="950" y="228" width="220" height="76" rx="12"/>
+    <text class="t" x="974" y="261">Merchant</text><text class="s" x="974" y="285">delivers on settled</text></g>
+  
+  <g class="box"><rect x="460" y="556" width="280" height="76" rx="12"/>
+    <text class="t" x="484" y="589">Rail</text><text class="s" x="484" y="613">PSP or chain — moves the money</text></g>
+</svg>
