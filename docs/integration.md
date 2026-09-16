@@ -12,7 +12,7 @@ let ledger = Ledger::new(store, rail, signers, clock);
 
 | Slot | Trait | Start with | Production |
 |---|---|---|---|
-| `store` | `Store` | `MemoryStore` | a SQL implementation — `append` must be one transaction |
+| `store` | `Store` | `MemoryStore` | `PostgresStore` from `ml-store-postgres` — durable, and `append` is one transaction |
 | `rail` | `Rail` | `MockRail` | one per money-mover: `RazorpayRail`, `X402Rail`… |
 | `signers` | `SignerPolicy` | `TrustedSigners` | your user-key directory |
 | `clock` | `Clock` | `SystemClock` | `SystemClock` |
