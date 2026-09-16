@@ -17,16 +17,21 @@ pub const T0: i64 = 1_800_000_000;
 
 /// The database to test against, or `None` to skip.
 ///
-/// Skipping is for a developer machine without Postgres. Under CI a skip
-/// would be a false green — the job would pass having exercised nothing —
-/// so a CI run without a database is a hard failure instead.
+/// Skipping is for a developer machine without Postgres, and for the
+/// workspace test job, which is deliberately database-independent. But a
+/// silent skip in the job that exists to run these would be a false green,
+/// so that job sets `ML_REQUIRE_DATABASE` and a missing URL is fatal there.
+///
+/// The requirement is stated explicitly rather than inferred from `CI`:
+/// every CI job sets `CI`, including the ones that are supposed to skip.
 pub fn url() -> Option<String> {
     if let Some(url) = std::env::var_os("ML_TEST_DATABASE_URL") {
         return Some(url.to_string_lossy().into_owned());
     }
     assert!(
-        std::env::var_os("CI").is_none(),
-        "ML_TEST_DATABASE_URL is unset under CI; these tests must not silently skip"
+        std::env::var_os("ML_REQUIRE_DATABASE").is_none(),
+        "ML_REQUIRE_DATABASE is set but ML_TEST_DATABASE_URL is not; \
+         these tests must not silently skip in the job that exists to run them"
     );
     None
 }
