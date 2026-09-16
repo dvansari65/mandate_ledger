@@ -14,14 +14,6 @@ It does not move money. It decides whether each step of a payment —
 authorize, pay, settle, deliver — is consistent, bounded and final, and
 records a hash-chained evidence trail of every decision, refusals included.
 
-```text
-  mandate ──┐
-            ├──► authorize ──► record_payment ──► record_settlement ──► record_delivery
-  cart ─────┘         │                                    │
-                      ▼                                    ▼
-                   expire                             compensate
-```
-
 Every call returns a token the next one requires, so an out-of-order
 lifecycle does not compile. Every decision, including every refusal, is
 appended to a chain anyone can verify without access to your database.
@@ -36,6 +28,7 @@ appended to a chain anyone can verify without access to your database.
 
 - [The problem](#the-problem)
 - [What it guarantees](#what-it-guarantees)
+- [Architecture](#architecture)
 - [Getting started](#getting-started)
 - [The five calls](#the-five-calls)
 - [Durable storage](#durable-storage)
@@ -73,6 +66,26 @@ the question. This library is the layer that asks it.
 
 [`docs/threat-model.md`](docs/threat-model.md) states precisely what is
 prevented, what is only bounded, and what is out of scope.
+
+## Architecture
+
+The library runs inside whichever service decides whether a payment step may
+proceed. A mandate arrives from the wallet and a cart from the agent; the
+payment rail is consulted but never commanded, and the merchant is handed a
+token it cannot forge.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/architecture-dark.svg">
+    <img alt="Where mandate-ledger sits: a wallet grants a mandate and an agent builds a cart; both enter the ledger, which checks signature, scope and budget, then moves the payment through authorized, paid, settled and delivered. Proof goes to the rail and finality comes back; the merchant receives a settled token. Any disagreement is refused and recorded." src="docs/assets/architecture-light.svg" width="900">
+  </picture>
+</p>
+
+Three things this picture is meant to make obvious. The rail decides what
+*final* means and the ledger waits for it, so the merchant never sees
+anything before `settled`. A refusal is not an error path bolted on the
+side — it lands in the same chain as a success, with a machine-readable
+reason. And nothing in the diagram moves money except the rail.
 
 ## Getting started
 
