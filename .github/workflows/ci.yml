@@ -66,6 +66,34 @@ jobs:
       - run: cargo build --workspace --all-targets
       - run: cargo test --workspace
 
+  postgres:
+    name: test (postgres)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # The workspace `test` job deliberately runs without this, so the
+      # Postgres tests skip there and stay independent of a database. Here
+      # they must run: `url()` fails rather than skip when CI is set.
+      ML_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo test -p ml-store-postgres
+
   docs:
     name: rustdoc
     runs-on: ubuntu-latest
