@@ -200,6 +200,17 @@ fn a_failed_settlement_releases_the_reservation() {
         ledger.state(a.ctx()).unwrap(),
         Some(PaymentState::Compensated)
     );
+
+    // A retried failure report after compensation still reads as failed: the
+    // row keeps its failure reason across the later transition.
+    let Settlement::Failed(again) = ledger
+        .record_settlement(&p, &ml_adapters::MockFinality::failed("pay-1", "reverted"))
+        .unwrap()
+    else {
+        panic!("expected the failure to replay");
+    };
+    assert_eq!(again.reason(), "reverted");
+    assert_eq!(f.store.events(a.ctx()).unwrap().len(), 4);
 }
 
 #[test]

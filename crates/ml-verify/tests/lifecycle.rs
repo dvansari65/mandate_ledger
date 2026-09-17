@@ -248,3 +248,62 @@ fn resume_reconstructs_tokens_across_requests() {
             .is_none()
     );
 }
+
+#[test]
+fn settlement_replays_from_every_later_state() {
+    // Finality webhooks are retried, and they arrive whenever the rail feels
+    // like it — including after the merchant has already delivered. A retry
+    // must get the same answer as the first call, and must not be written
+    // into the evidence chain as a refusal.
+    let h = harness();
+    let m = mandate();
+
+    let a = h
+        .ledger
+        .authorize(&m, &cart("bigbasket.com", "10"), "o1")
+        .unwrap();
+    let p = h
+        .ledger
+        .record_payment(&a, &MockProof::bound_to(a.ctx(), "pay_1", inr("10")))
+        .unwrap();
+    let f = MockFinality::confirmed("pay_1", 1);
+    let Settlement::Settled(s) = h.ledger.record_settlement(&p, &f).unwrap() else {
+        panic!("expected settled");
+    };
+    let receipt = DeliveryReceipt {
+        reference: "r".into(),
+        attestation: Attestation::AgentReported,
+    };
+    h.ledger.record_delivery(&s, receipt).unwrap();
+
+    let Settlement::Settled(again) = h.ledger.record_settlement(&p, &f).unwrap() else {
+        panic!("a retried finality report after delivery must still read as settled");
+    };
+    assert_eq!(again.reference(), s.reference());
+    assert_eq!(
+        h.ledger.evidence(a.ctx()).unwrap().unwrap().events.len(),
+        4,
+        "the retry must not add a Denied event"
+    );
+
+    // The same after the failure path has been compensated.
+    let b = h
+        .ledger
+        .authorize(&m, &cart("bigbasket.com", "10"), "o2")
+        .unwrap();
+    let p = h
+        .ledger
+        .record_payment(&b, &MockProof::bound_to(b.ctx(), "pay_2", inr("10")))
+        .unwrap();
+    let f = MockFinality::failed("pay_2", "reverted");
+    let Settlement::Failed(failed) = h.ledger.record_settlement(&p, &f).unwrap() else {
+        panic!("expected failed");
+    };
+    h.ledger.compensate(&failed, Some("refund_1")).unwrap();
+
+    let Settlement::Failed(again) = h.ledger.record_settlement(&p, &f).unwrap() else {
+        panic!("a retried failure report after compensation must still read as failed");
+    };
+    assert_eq!(again.reason(), "reverted");
+    assert_eq!(h.ledger.evidence(b.ctx()).unwrap().unwrap().events.len(), 4);
+}

@@ -407,6 +407,12 @@ where
     }
 
     /// If `rec` is already past `Paid`, the idempotent result to return.
+    ///
+    /// Rails retry finality reports, and a retry can land after the merchant
+    /// has delivered or the host has compensated. Those contexts still carry
+    /// their settlement outcome, so they answer exactly as the first call
+    /// did. Refusing them would write a `Denied` into a healthy chain on
+    /// every retry.
     fn settlement_replay(
         &self,
         ctx: &ContextId,
@@ -415,7 +421,7 @@ where
     ) -> Result<Option<Settlement>, LedgerError> {
         match rec.state {
             PaymentState::Paid => Ok(None),
-            PaymentState::Settled => {
+            PaymentState::Settled | PaymentState::Delivered => {
                 let reference = rec
                     .settlement_reference
                     .clone()
@@ -425,7 +431,7 @@ where
                     reference,
                 ))))
             }
-            PaymentState::SettlementFailed => {
+            PaymentState::SettlementFailed | PaymentState::Compensated => {
                 let reason = rec
                     .failure_reason
                     .clone()
