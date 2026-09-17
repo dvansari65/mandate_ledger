@@ -325,3 +325,59 @@ fn denials_are_recorded_as_evidence() {
         }
     ));
 }
+
+/// A store whose `is_revoked` never says yes. It disarms the engine's early
+/// check, which is what a `revoke` landing between that check and the append
+/// does in production — leaving only whatever the store enforces inside
+/// `append` itself.
+struct BlindToRevocation(Arc<MemoryStore>);
+
+impl Store for BlindToRevocation {
+    fn record(&self, ctx: &ContextId) -> Result<Option<Record>, StoreError> {
+        self.0.record(ctx)
+    }
+    fn events(&self, ctx: &ContextId) -> Result<Vec<Event>, StoreError> {
+        self.0.events(ctx)
+    }
+    fn append(
+        &self,
+        ctx: &ContextId,
+        at: Timestamp,
+        body: EventBody,
+    ) -> Result<AppendOutcome, StoreError> {
+        self.0.append(ctx, at, body)
+    }
+    fn reserved(&self, mandate: &MandateId) -> Result<Option<Money>, StoreError> {
+        self.0.reserved(mandate)
+    }
+    fn is_revoked(&self, _: &MandateId) -> Result<bool, StoreError> {
+        Ok(false)
+    }
+    fn revoke(&self, mandate: &MandateId) -> Result<(), StoreError> {
+        self.0.revoke(mandate)
+    }
+}
+
+#[test]
+fn a8_revocation_is_enforced_inside_append_not_only_before_it() {
+    let store = Arc::new(MemoryStore::new());
+    let signers = TrustedSigners::new().allow(principal(), user_key().verifying_key().to_bytes());
+    let ledger = Ledger::new(
+        BlindToRevocation(Arc::clone(&store)),
+        MockRail::new("mock", 1),
+        signers,
+        Arc::new(FixedClock::at(T0 + 60)),
+    );
+    let m = mandate();
+    ledger.revoke(m.id()).unwrap();
+
+    let err = ledger
+        .authorize(&m, &cart("bigbasket.com", "10"), "k")
+        .unwrap_err();
+    assert_eq!(reason(&err), DenyReason::MandateRevoked);
+    assert_eq!(
+        store.reserved(m.id()).unwrap(),
+        None,
+        "nothing may be reserved under a revoked mandate"
+    );
+}

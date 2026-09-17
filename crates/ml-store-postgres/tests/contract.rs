@@ -278,3 +278,55 @@ fn migrate_on_a_live_database_never_deadlocks_with_appends() {
         }
     });
 }
+
+/// A store whose `is_revoked` never says yes — the engine's early check
+/// disarmed, as a `revoke` committing between that check and the append
+/// does — so only what `append` enforces on its own remains.
+struct BlindToRevocation(std::sync::Arc<ml_store_postgres::PostgresStore>);
+
+impl Store for BlindToRevocation {
+    fn record(&self, ctx: &ContextId) -> Result<Option<Record>, StoreError> {
+        self.0.record(ctx)
+    }
+    fn events(&self, ctx: &ContextId) -> Result<Vec<Event>, StoreError> {
+        self.0.events(ctx)
+    }
+    fn append(
+        &self,
+        ctx: &ContextId,
+        at: Timestamp,
+        body: EventBody,
+    ) -> Result<AppendOutcome, StoreError> {
+        self.0.append(ctx, at, body)
+    }
+    fn reserved(&self, mandate: &MandateId) -> Result<Option<Money>, StoreError> {
+        self.0.reserved(mandate)
+    }
+    fn is_revoked(&self, _: &MandateId) -> Result<bool, StoreError> {
+        Ok(false)
+    }
+    fn revoke(&self, mandate: &MandateId) -> Result<(), StoreError> {
+        self.0.revoke(mandate)
+    }
+}
+
+#[test]
+fn revocation_is_enforced_inside_append() {
+    let f = pg_or_skip!("revoke-in-append");
+    let m = f.mandate();
+    let ledger = Ledger::new(
+        BlindToRevocation(std::sync::Arc::clone(&f.store)),
+        ml_adapters::MockRail::new(f.rail_name(), 1),
+        f.signers(),
+        std::sync::Arc::clone(&f.clock),
+    );
+    ledger.revoke(m.id()).unwrap();
+
+    let err = ledger.authorize(&m, &f.cart("10.00"), "k").unwrap_err();
+    assert_eq!(err.reason(), Some(DenyReason::MandateRevoked), "{err}");
+    assert_eq!(
+        f.store.reserved(m.id()).unwrap(),
+        None,
+        "nothing may be reserved under a revoked mandate"
+    );
+}

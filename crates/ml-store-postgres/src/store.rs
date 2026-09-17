@@ -32,8 +32,10 @@ const MIGRATIONS: [&str; 1] = [include_str!("migrations/0001_initial.sql")];
 /// one step at a time.
 const LOCK_CONTEXT: i32 = 1;
 /// Serializes authorizations against one mandate, so two contexts cannot
-/// both pass the same budget check. Always taken *after* [`LOCK_CONTEXT`],
-/// never before, so no deadlock cycle can form.
+/// both pass the same budget check — and serializes a revocation against
+/// them, so it cannot slip between an authorization's check and its commit.
+/// Always taken *after* [`LOCK_CONTEXT`], never before, so no deadlock cycle
+/// can form.
 const LOCK_MANDATE: i32 = 2;
 
 /// A durable [`Store`] backed by PostgreSQL.
@@ -271,6 +273,18 @@ impl Store for PostgresStore {
                 Self::check_transition(existing.as_ref(), ctx, PaymentState::Authorized)?;
                 let scope = &mandate.body.scope;
                 let mandate_id = &mandate.body.id;
+
+                // Under the mandate lock, so a revoke is either wholly before
+                // this authorization or wholly after it.
+                let revoked = tx
+                    .query_opt(
+                        "SELECT 1 FROM ml_revocations WHERE mandate_id = $1",
+                        &[&mandate_id.as_str()],
+                    )
+                    .map_err(pg)?;
+                if revoked.is_some() {
+                    return Ok(AppendOutcome::MandateRevoked);
+                }
 
                 if let Some(v) = scope.velocity {
                     let since = at.saturating_sub_secs(v.window_secs);
@@ -554,11 +568,20 @@ impl Store for PostgresStore {
 
     fn revoke(&self, mandate: &MandateId) -> Result<(), StoreError> {
         let mut conn = self.pool.get().map_err(backend)?;
-        conn.execute(
+        let mut tx = conn.transaction().map_err(pg)?;
+        // The same lock an authorization takes, so the two serialize: an
+        // authorization in flight either commits before this row is visible
+        // or sees it and refuses. Without the lock, both could pass.
+        tx.query(
+            "SELECT pg_advisory_xact_lock($1, hashtext($2))",
+            &[&LOCK_MANDATE, &mandate.as_str()],
+        )
+        .map_err(pg)?;
+        tx.execute(
             "INSERT INTO ml_revocations (mandate_id) VALUES ($1) ON CONFLICT DO NOTHING",
             &[&mandate.as_str()],
         )
         .map_err(pg)?;
-        Ok(())
+        tx.commit().map_err(pg)
     }
 }

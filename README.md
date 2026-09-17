@@ -60,7 +60,7 @@ the question. This library is the layer that asks it.
 | One payment nonce, one payment | the store claims nonces atomically on append, arbitrated by a unique index |
 | The cart approved is the cart paid | the cart hash is bound at `authorize` and checked at `record_payment` |
 | Budgets hold under concurrency | the reservation is applied inside the store's append, in one transaction |
-| Mandates can be revoked | `revoke()` — every later `authorize` under that mandate is denied |
+| Mandates can be revoked | `revoke()` — every later `authorize` is denied, decided inside the store's append so a revocation cannot race an authorization |
 | Refusals are auditable | denials are ledger events, with stable machine-readable codes |
 | Nothing is inferred | a scope constraint the cart cannot satisfy yields `UNVERIFIABLE_SCOPE`, never a pass |
 
