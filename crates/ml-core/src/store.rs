@@ -3,9 +3,10 @@
 //! A [`Store`] does three things: keep the current [`Record`] per context,
 //! keep the hash-chained [`Event`] log, and — crucially — **apply an event's
 //! side effects atomically with appending it**. Budget reservation, velocity
-//! counting, and nonce consumption all happen inside [`Store::append`], so
-//! there is no window between "check" and "commit" for a concurrent request
-//! to slip through. A SQL implementation should make `append` one transaction.
+//! counting, nonce consumption and the revocation check all happen inside
+//! [`Store::append`], so there is no window between "check" and "commit" for
+//! a concurrent request — or a concurrent `revoke` — to slip through. A SQL
+//! implementation should make `append` one transaction.
 
 use crate::error::StoreError;
 use crate::event::{Event, EventBody};
@@ -65,6 +66,10 @@ pub enum AppendOutcome {
     },
     /// `Paid` refused: the nonce was consumed by a different context.
     NonceAlreadyUsed,
+    /// `Authorized` refused: the mandate is revoked. The engine checks this
+    /// before appending as well, but only the store can decide it atomically
+    /// with the reservation.
+    MandateRevoked,
 }
 
 /// Persistence for the ledger.
@@ -96,7 +101,9 @@ pub trait Store: Send + Sync {
     /// Whether `mandate` has been revoked.
     fn is_revoked(&self, mandate: &MandateId) -> Result<bool, StoreError>;
 
-    /// Revoke `mandate`. Idempotent. Does not affect contexts already authorized.
+    /// Revoke `mandate`. Idempotent. Does not affect contexts already
+    /// authorized; every `Authorized` appended afterwards must be refused with
+    /// [`AppendOutcome::MandateRevoked`].
     fn revoke(&self, mandate: &MandateId) -> Result<(), StoreError>;
 }
 
@@ -207,6 +214,10 @@ impl Store for MemoryStore {
                 g.check_transition(ctx, PaymentState::Authorized)?;
                 let scope = &mandate.body.scope;
                 let mandate_id = &mandate.body.id;
+
+                if g.revoked.contains(mandate_id) {
+                    return Ok(AppendOutcome::MandateRevoked);
+                }
 
                 if let Some(v) = scope.velocity {
                     let since = at.saturating_sub_secs(v.window_secs);

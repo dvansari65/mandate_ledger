@@ -78,7 +78,9 @@ where
     ///
     /// Order of checks: replay → signature → signer trust → revocation →
     /// scope (validity, attestation, merchant, category, currency, per-txn)
-    /// → velocity and budget (atomically, in the store).
+    /// → revocation again, velocity and budget (atomically, in the store).
+    /// The early revocation check is a fast exit; the one inside the store is
+    /// the guarantee, because a `revoke` can land between the two.
     pub fn authorize(
         &self,
         mandate: &Mandate,
@@ -164,6 +166,13 @@ where
                 Stage::Authorize,
                 DenyReason::VelocityExceeded,
                 format!("{count} authorizations already in the velocity window"),
+            ),
+            AppendOutcome::MandateRevoked => self.deny(
+                &ctx,
+                now,
+                Stage::Authorize,
+                DenyReason::MandateRevoked,
+                format!("mandate {} is revoked", mandate.id()),
             ),
             AppendOutcome::NonceAlreadyUsed => {
                 Err(StoreError::Corrupt("nonce outcome returned for Authorized".to_owned()).into())
@@ -258,8 +267,10 @@ where
                 DenyReason::NonceAlreadyUsed,
                 "nonce already consumed by another context".to_owned(),
             ),
-            AppendOutcome::BudgetExceeded { .. } | AppendOutcome::VelocityExceeded { .. } => {
-                Err(StoreError::Corrupt("budget outcome returned for Paid".to_owned()).into())
+            AppendOutcome::BudgetExceeded { .. }
+            | AppendOutcome::VelocityExceeded { .. }
+            | AppendOutcome::MandateRevoked => {
+                Err(StoreError::Corrupt("authorize outcome returned for Paid".to_owned()).into())
             }
         }
     }
