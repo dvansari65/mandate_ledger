@@ -2,7 +2,9 @@
 //!
 //! A [`Store`] does three things: keep the current [`Record`] per context,
 //! keep the hash-chained [`Event`] log, and — crucially — **apply an event's
-//! side effects atomically with appending it**. Budget reservation, velocity
+//! side effects atomically with appending it**. It also answers the two
+//! questions an operator asks: what happened ([`Store::events_after`]) and
+//! where every context stands ([`Store::scan`]). Budget reservation, velocity
 //! counting, nonce consumption and the revocation check all happen inside
 //! [`Store::append`], so there is no window between "check" and "commit" for
 //! a concurrent request — or a concurrent `revoke` — to slip through. A SQL
@@ -72,6 +74,25 @@ pub enum AppendOutcome {
     MandateRevoked,
 }
 
+/// Which contexts [`Store::scan`] returns. Every field is optional; the
+/// default filter matches every context.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RecordFilter {
+    /// Only contexts authorized under this mandate.
+    pub mandate: Option<MandateId>,
+    /// Only contexts currently in this state.
+    pub state: Option<PaymentState>,
+}
+
+impl RecordFilter {
+    fn matches(&self, record: &Record) -> bool {
+        self.mandate
+            .as_ref()
+            .is_none_or(|m| *m == record.mandate_id)
+            && self.state.is_none_or(|s| s == record.state)
+    }
+}
+
 /// Persistence for the ledger.
 ///
 /// All methods take `&self`; implementations provide their own locking or
@@ -94,6 +115,20 @@ pub trait Store: Send + Sync {
         at: Timestamp,
         body: EventBody,
     ) -> Result<AppendOutcome, StoreError>;
+
+    /// Events across every context with `seq > after`, in sequence order, at
+    /// most `limit` of them. This is the whole log, denials included.
+    ///
+    /// Sequence numbers are assigned in commit order: once an event is
+    /// visible, every event with a smaller `seq` is visible too. The last
+    /// `seq` a reader saw is therefore its cursor — pass it back to read what
+    /// came next, and nothing is skipped.
+    fn events_after(&self, after: u64, limit: usize) -> Result<Vec<Event>, StoreError>;
+
+    /// The current record of every context matching `filter`, ordered by
+    /// context id (byte-wise), at most `limit` of them. A context that has
+    /// only ever been refused has no record; its refusals are in the log.
+    fn scan(&self, filter: &RecordFilter, limit: usize) -> Result<Vec<Record>, StoreError>;
 
     /// Total currently reserved against `mandate` (live authorizations).
     fn reserved(&self, mandate: &MandateId) -> Result<Option<Money>, StoreError>;
@@ -350,6 +385,29 @@ impl Store for MemoryStore {
         Ok(AppendOutcome::Appended(event))
     }
 
+    fn events_after(&self, after: u64, limit: usize) -> Result<Vec<Event>, StoreError> {
+        let g = self.lock()?;
+        Ok(g.events
+            .iter()
+            .filter(|e| e.seq > after)
+            .take(limit)
+            .cloned()
+            .collect())
+    }
+
+    fn scan(&self, filter: &RecordFilter, limit: usize) -> Result<Vec<Record>, StoreError> {
+        let g = self.lock()?;
+        let mut hits: Vec<Record> = g
+            .records
+            .values()
+            .filter(|r| filter.matches(r))
+            .cloned()
+            .collect();
+        hits.sort_by(|a, b| a.ctx.cmp(&b.ctx));
+        hits.truncate(limit);
+        Ok(hits)
+    }
+
     fn reserved(&self, mandate: &MandateId) -> Result<Option<Money>, StoreError> {
         Ok(self.lock()?.reserved.get(mandate).cloned())
     }
@@ -378,6 +436,12 @@ impl<S: Store + ?Sized> Store for std::sync::Arc<S> {
         body: EventBody,
     ) -> Result<AppendOutcome, StoreError> {
         (**self).append(ctx, at, body)
+    }
+    fn events_after(&self, after: u64, limit: usize) -> Result<Vec<Event>, StoreError> {
+        (**self).events_after(after, limit)
+    }
+    fn scan(&self, filter: &RecordFilter, limit: usize) -> Result<Vec<Record>, StoreError> {
+        (**self).scan(filter, limit)
     }
     fn reserved(&self, mandate: &MandateId) -> Result<Option<Money>, StoreError> {
         (**self).reserved(mandate)

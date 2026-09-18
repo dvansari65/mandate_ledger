@@ -310,6 +310,12 @@ impl Store for BlindToRevocation {
     ) -> Result<AppendOutcome, StoreError> {
         self.0.append(ctx, at, body)
     }
+    fn events_after(&self, after: u64, limit: usize) -> Result<Vec<Event>, StoreError> {
+        self.0.events_after(after, limit)
+    }
+    fn scan(&self, filter: &RecordFilter, limit: usize) -> Result<Vec<Record>, StoreError> {
+        self.0.scan(filter, limit)
+    }
     fn reserved(&self, mandate: &MandateId) -> Result<Option<Money>, StoreError> {
         self.0.reserved(mandate)
     }
@@ -339,5 +345,167 @@ fn revocation_is_enforced_inside_append() {
         f.store.reserved(m.id()).unwrap(),
         None,
         "nothing may be reserved under a revoked mandate"
+    );
+}
+
+#[test]
+fn the_log_spans_contexts_and_pages_by_seq() {
+    let f = pg_or_skip!("log");
+    let m = f.mandate();
+    let ledger = f.ledger();
+    let a = ledger.authorize(&m, &f.cart("10.00"), "o1").unwrap();
+    let b = ledger.authorize(&m, &f.cart("20.00"), "o2").unwrap();
+    ledger
+        .record_payment(&a, &MockProof::bound_to(a.ctx(), "pay-1", inr("10.00")))
+        .unwrap();
+    let denied = ledger
+        .authorize(&m, &f.cart("3000.01"), "o3") // over the per-transaction cap
+        .unwrap_err()
+        .denied()
+        .expect("a refusal")
+        .ctx
+        .clone();
+
+    // Other tests write to the same log at the same time, so read the tail
+    // from our first event and keep only our own contexts.
+    let mine = [a.ctx(), b.ctx(), &denied];
+    let first = f.store.events(a.ctx()).unwrap()[0].seq;
+    let ours = |limit: usize| {
+        let mut cursor = first - 1;
+        let mut kept = Vec::new();
+        loop {
+            let page = f.store.events_after(cursor, limit).unwrap();
+            let Some(last) = page.last() else { break };
+            cursor = last.seq;
+            kept.extend(page.into_iter().filter(|e| mine.contains(&&e.ctx)));
+        }
+        kept
+    };
+
+    let all = ours(10_000);
+    assert_eq!(
+        all.iter().map(|e| &e.ctx).collect::<Vec<_>>(),
+        [a.ctx(), b.ctx(), a.ctx(), &denied]
+    );
+    assert!(all.windows(2).all(|w| w[0].seq < w[1].seq));
+    assert_eq!(ours(2), all, "paging with a small limit reads the same log");
+    assert!(f.store.events_after(u64::MAX, 10).unwrap().is_empty());
+}
+
+#[test]
+fn scan_filters_by_mandate_and_state_in_byte_order() {
+    let f = pg_or_skip!("scan");
+    let m = f.mandate();
+    let ledger = f.ledger();
+    let a = ledger.authorize(&m, &f.cart("10.00"), "o1").unwrap();
+    let b = ledger.authorize(&m, &f.cart("20.00"), "o2").unwrap();
+    ledger
+        .record_payment(&a, &MockProof::bound_to(a.ctx(), "pay-1", inr("10.00")))
+        .unwrap();
+
+    // Three more contexts whose ids a locale orders differently from bytes:
+    // ASCII puts '_' between 'B' and 'a', en_US puts it first. The scan must
+    // agree with the in-memory store, which sorts by bytes.
+    let crafted = ["B", "_", "a"].map(|s| ContextId::new(format!("{}-{s}", f.tag)).unwrap());
+    for ctx in &crafted {
+        let body = EventBody::Authorized {
+            mandate: m.clone(),
+            cart: CartSnapshot::from(&f.cart("1.00")),
+            request_key: "k".into(),
+        };
+        f.store.append(ctx, Timestamp(T0), body).unwrap();
+    }
+
+    // Always narrowed to this test's mandate: the table is shared with the
+    // other tests running alongside.
+    let under = |state: Option<PaymentState>| RecordFilter {
+        mandate: Some(m.id().clone()),
+        state,
+    };
+    let ids = |records: Vec<Record>| records.into_iter().map(|r| r.ctx).collect::<Vec<_>>();
+    let mut all = vec![a.ctx().clone(), b.ctx().clone()];
+    all.extend(crafted);
+    all.sort();
+
+    assert_eq!(ids(f.store.scan(&under(None), 10).unwrap()), all);
+    assert_eq!(ids(f.store.scan(&under(None), 1).unwrap()), &all[..1]);
+    assert_eq!(
+        ids(f.store.scan(&under(Some(PaymentState::Paid)), 10).unwrap()),
+        [a.ctx().clone()]
+    );
+    assert!(
+        f.store
+            .scan(&under(Some(PaymentState::Delivered)), 10)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn a_late_commit_cannot_hide_an_event_from_a_reader_tailing_by_seq() {
+    let f = pg_or_skip!("late-commit");
+    let m = f.mandate();
+    let cart = f.cart("1.00");
+    let ledger = f.ledger();
+
+    // The sentinel creates the mandate's reservation row and marks where this
+    // test's events begin in the shared log.
+    let start = ledger.authorize(&m, &cart, "start").unwrap();
+    let start_seq = f.store.events(start.ctx()).unwrap()[0].seq;
+
+    let (held_tx, held_rx) = std::sync::mpsc::channel::<()>();
+    let (go_tx, go_rx) = std::sync::mpsc::channel::<()>();
+    let pause = std::time::Duration::from_millis(300);
+
+    let (slow_ctx, refused_ctx, first_page, second_page) = thread::scope(|s| {
+        // An operator holding the reservation row. It stalls the next
+        // authorization *after* that append has drawn its sequence number.
+        let (store, mandate_id) = (&f.store, m.id().clone());
+        s.spawn(move || {
+            let mut conn = store.pool().get().unwrap();
+            let mut tx = conn.transaction().unwrap();
+            tx.execute(
+                "SELECT amount FROM ml_reservations WHERE mandate_id = $1 FOR UPDATE",
+                &[&mandate_id.as_str()],
+            )
+            .unwrap();
+            held_tx.send(()).unwrap();
+            go_rx.recv().unwrap();
+            tx.commit().unwrap();
+        });
+        held_rx.recv().unwrap();
+
+        let slow = s.spawn(|| ledger.authorize(&m, &cart, "slow").unwrap().ctx().clone());
+        thread::sleep(pause); // it draws its seq, then blocks on the row
+        // A refusal on a fresh context never touches the reservation row.
+        let refused = s.spawn(|| {
+            let err = ledger
+                .authorize(&m, &f.cart("3000.01"), "over")
+                .unwrap_err();
+            err.denied().expect("a refusal").ctx.clone()
+        });
+        thread::sleep(pause);
+
+        // A tailing reader: whatever it sees now, the last seq is its cursor.
+        let first_page = f.store.events_after(start_seq, 100).unwrap();
+        let cursor = first_page.last().map_or(start_seq, |e| e.seq);
+
+        go_tx.send(()).unwrap(); // the operator lets go; everything commits
+        let slow_ctx = slow.join().unwrap();
+        let refused_ctx = refused.join().unwrap();
+        let second_page = f.store.events_after(cursor, 100).unwrap();
+        (slow_ctx, refused_ctx, first_page, second_page)
+    });
+
+    let seen: Vec<&ContextId> = first_page
+        .iter()
+        .chain(&second_page)
+        .map(|e| &e.ctx)
+        .filter(|c| **c == slow_ctx || **c == refused_ctx)
+        .collect();
+    assert_eq!(
+        seen,
+        [&slow_ctx, &refused_ctx],
+        "the reader advanced past a sequence number whose transaction had not committed"
     );
 }

@@ -1,12 +1,12 @@
 //! The PostgreSQL [`Store`] implementation.
 
 use crate::convert::{
-    EVENT_COLUMNS, RECORD_COLUMNS, backend, corrupt, event_from_row, money_from_sql, pg,
+    EVENT_COLUMNS, RECORD_COLUMNS, backend, bigint, corrupt, event_from_row, money_from_sql, pg,
     record_from_row, state_to_sql,
 };
 use ml_core::{
     AppendOutcome, ContextId, Event, EventBody, Hash32, MandateId, Money, PaymentState, Record,
-    Store, StoreError, Timestamp,
+    RecordFilter, Store, StoreError, Timestamp,
 };
 use postgres::{Config, GenericClient, NoTls};
 use r2d2::Pool;
@@ -37,6 +37,11 @@ const LOCK_CONTEXT: i32 = 1;
 /// Always taken *after* [`LOCK_CONTEXT`], never before, so no deadlock cycle
 /// can form.
 const LOCK_MANDATE: i32 = 2;
+/// Serializes the write phase of every append, across all contexts, so
+/// sequence numbers are assigned in commit order and the log can be tailed
+/// by `seq`. Always taken last, after every read and after the nonce claim,
+/// so a transaction holding it never waits on one that wants it.
+const LOCK_LOG: i32 = 3;
 
 /// A durable [`Store`] backed by PostgreSQL.
 ///
@@ -384,6 +389,14 @@ impl Store for PostgresStore {
             EventBody::Denied { .. } => {}
         }
 
+        // From here to commit, appends across every context run one at a
+        // time. A sequence number has to be assigned in commit order, or a
+        // reader tailing the log by seq skips any event whose transaction
+        // finishes late. The decision above already ran in parallel; only the
+        // writes queue.
+        tx.query("SELECT pg_advisory_xact_lock($1, 0)", &[&LOCK_LOG])
+            .map_err(pg)?;
+
         // The sequence number is part of the hash preimage, so it has to be
         // drawn before the row is built. nextval is non-transactional: a
         // rollback leaves a gap, which evidence verification tolerates.
@@ -548,6 +561,35 @@ impl Store for PostgresStore {
 
         tx.commit().map_err(pg)?;
         Ok(AppendOutcome::Appended(event))
+    }
+
+    fn events_after(&self, after: u64, limit: usize) -> Result<Vec<Event>, StoreError> {
+        let mut conn = self.pool.get().map_err(backend)?;
+        let sql =
+            format!("SELECT {EVENT_COLUMNS} FROM ml_events WHERE seq > $1 ORDER BY seq LIMIT $2");
+        conn.query(&sql, &[&bigint(after), &bigint(limit)])
+            .map_err(pg)?
+            .iter()
+            .map(event_from_row)
+            .collect()
+    }
+
+    fn scan(&self, filter: &RecordFilter, limit: usize) -> Result<Vec<Record>, StoreError> {
+        let mut conn = self.pool.get().map_err(backend)?;
+        // Ordered byte-wise, so contexts come back in exactly the order the
+        // in-memory store lists them, whatever the database's locale.
+        let sql = format!(
+            "SELECT {RECORD_COLUMNS} FROM ml_contexts \
+             WHERE ($1::text IS NULL OR mandate_id = $1) AND ($2::text IS NULL OR state = $2) \
+             ORDER BY ctx COLLATE \"C\" LIMIT $3"
+        );
+        let mandate = filter.mandate.as_ref().map(MandateId::as_str);
+        let state = filter.state.map(state_to_sql);
+        conn.query(&sql, &[&mandate, &state, &bigint(limit)])
+            .map_err(pg)?
+            .iter()
+            .map(record_from_row)
+            .collect()
     }
 
     fn reserved(&self, mandate: &MandateId) -> Result<Option<Money>, StoreError> {
