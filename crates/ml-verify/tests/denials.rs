@@ -347,6 +347,12 @@ impl Store for BlindToRevocation {
     ) -> Result<AppendOutcome, StoreError> {
         self.0.append(ctx, at, body)
     }
+    fn events_after(&self, after: u64, limit: usize) -> Result<Vec<Event>, StoreError> {
+        self.0.events_after(after, limit)
+    }
+    fn scan(&self, filter: &RecordFilter, limit: usize) -> Result<Vec<Record>, StoreError> {
+        self.0.scan(filter, limit)
+    }
     fn reserved(&self, mandate: &MandateId) -> Result<Option<Money>, StoreError> {
         self.0.reserved(mandate)
     }

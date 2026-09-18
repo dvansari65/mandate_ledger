@@ -25,6 +25,12 @@
 //! different contexts cannot both pass the same budget check. Locks are
 //! always taken context-first, so no deadlock cycle exists.
 //!
+//! Sequence numbers are drawn under one more advisory lock, held to commit,
+//! so they are assigned in commit order: a reader tailing the log by `seq`
+//! never skips an event whose transaction finished late. The decision phase
+//! of an append still runs in parallel across contexts; only the write phase
+//! — a few inserts and the commit — queues.
+//!
 //! The concurrency tests in `ml-verify` are run against this store unchanged:
 //! sixteen threads against one budget still yield exactly ten authorizations,
 //! and eight threads presenting one nonce still yield exactly one payment.

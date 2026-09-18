@@ -72,7 +72,7 @@ pub use state::{
     Authorized, Compensated, Delivered, Paid, PaymentState, Resumed, Settled, Settlement,
     SettlementFailed,
 };
-pub use store::{AppendOutcome, MemoryStore, Record, Store};
+pub use store::{AppendOutcome, MemoryStore, Record, RecordFilter, Store};
 pub use time::{Clock, FixedClock, SystemClock, Timestamp};
 
 /// Re-exported so hosts don't need a direct `ed25519-dalek` dependency to sign mandates.

@@ -203,7 +203,7 @@ Four traits, each small:
 |---|---|---|
 | `CartAdapter` | wire format → `Cart { hash, claims, attestation }` | `NativeCartAdapter` — JSON with an optional merchant signature |
 | `Rail` | verify a payment proof, report finality | `MockRail`; real rails are next |
-| `Store` | records and hash-chained events, side effects applied atomically | `MemoryStore`, `PostgresStore` |
+| `Store` | records and hash-chained events, side effects applied atomically; the log and the contexts readable across a restart | `MemoryStore`, `PostgresStore` |
 | `SignerPolicy` | which keys may sign mandates for which principal | `TrustedSigners`; `AcceptAnySigner` is for tests and says so |
 
 A `CartAdapter` must fill only the claims its protocol actually carries.

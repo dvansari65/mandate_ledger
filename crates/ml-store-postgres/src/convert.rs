@@ -55,6 +55,13 @@ pub fn corrupt<E: std::fmt::Display>(e: E) -> StoreError {
     StoreError::Corrupt(e.to_string())
 }
 
+/// A count or sequence number as a `BIGINT` parameter. Saturates rather than
+/// fails: no `seq` in the log is past `i64::MAX`, so the clamp only ever
+/// turns "more than exists" into "everything".
+pub fn bigint(n: impl TryInto<i64>) -> i64 {
+    n.try_into().unwrap_or(i64::MAX)
+}
+
 /// The column value for a state.
 pub const fn state_to_sql(state: PaymentState) -> &'static str {
     match state {
