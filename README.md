@@ -218,10 +218,12 @@ crates/ml-core             engine: types, mandates and scope, state machine,
 crates/ml-adapters         NativeCartAdapter, MockRail
 crates/ml-store-postgres   durable PostgreSQL store
 crates/ml-verify           lifecycle, denial, concurrency, tamper and property tests
+crates/ml-sandbox          the ml command: drive the engine from a terminal
 examples/quickstart        runnable end to end, no database required
 site/                      landing page (Next.js, TypeScript)
 docs/threat-model.md       what is prevented, bounded, and out of scope
 docs/integration.md        how a merchant, gateway or wallet wires this in
+docs/sandbox.md            the ml command, its files and its exit codes
 ```
 
 ## Development

@@ -5,6 +5,7 @@ members = [
     "crates/ml-adapters",
     "crates/ml-store-postgres",
     "crates/ml-verify",
+    "crates/ml-sandbox",
     "examples/quickstart",
 ]
 
@@ -29,6 +30,8 @@ base64 = "0.23"
 ed25519-dalek = "3"
 thiserror = "2"
 proptest = "1"
+clap = { version = "4", features = ["derive"] }
+getrandom = "0.4"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
