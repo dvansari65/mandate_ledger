@@ -15,11 +15,28 @@ pub fn read_json<T: DeserializeOwned>(path: &Path) -> Result<T, Failure> {
         .map_err(|e| Failure::undecided(format!("{} is not valid: {e}", path.display())))
 }
 
-/// Write a value as pretty JSON, replacing whatever was there.
+/// Write a value as pretty JSON, replacing whatever was there — atomically,
+/// so a crash mid-write leaves the old file intact rather than half of the
+/// new one. The temporary file lives next to the target, so the rename never
+/// crosses a filesystem.
 pub fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), Failure> {
-    let file = fs::File::create(path)
-        .map_err(|e| Failure::undecided(format!("cannot write {}: {e}", path.display())))?;
-    fill(file, path, value)
+    let failed = |e: &dyn std::fmt::Display| {
+        Failure::undecided(format!("cannot write {}: {e}", path.display()))
+    };
+    let name = path.file_name().ok_or_else(|| failed(&"not a file path"))?;
+    let mut tmp_name = name.to_os_string();
+    tmp_name.push(".tmp");
+    let tmp = path.with_file_name(tmp_name);
+
+    let file = fs::File::create(&tmp).map_err(|e| failed(&e))?;
+    if let Err(e) = fill(file, &tmp, value) {
+        let _ = fs::remove_file(&tmp);
+        return Err(e);
+    }
+    fs::rename(&tmp, path).map_err(|e| {
+        let _ = fs::remove_file(&tmp);
+        failed(&e)
+    })
 }
 
 /// Write a value as pretty JSON into a new file only the owner can read.

@@ -133,6 +133,10 @@ fn mandate_sign_produces_a_mandate_the_engine_verifies() {
     assert_eq!(report["mandate"], "mnd-1");
     assert_eq!(report["principal"], "user:alice");
     assert_eq!(report["signer"], key_file["public"]);
+
+    // Re-signing replaced the file in place, through a temporary that is gone.
+    assert!(out.exists());
+    assert!(!dir.join("mandate.json.tmp").exists());
 }
 
 #[test]

@@ -7,7 +7,7 @@
 //! The secret is stored in the clear. That is acceptable for a sandbox and
 //! for nothing else; a production wallet keeps its key in an HSM or a
 //! signer service and hands the engine only signatures. The file is created
-//! readable by its owner alone and is never overwritten.
+//! readable by its owner alone (on Unix) and is never overwritten.
 
 use crate::Failure;
 use crate::files;

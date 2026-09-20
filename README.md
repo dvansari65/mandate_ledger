@@ -229,7 +229,7 @@ docs/sandbox.md            the ml command, its files and its exit codes
 ## Development
 
 ```bash
-cargo test --workspace                    # 61 tests; Postgres suites skip without a database
+cargo test --workspace                    # every suite; the Postgres ones skip without a database
 cargo clippy --workspace --all-targets    # pedantic, zero warnings
 cargo fmt --all --check
 ```
