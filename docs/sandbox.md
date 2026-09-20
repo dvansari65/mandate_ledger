@@ -34,7 +34,7 @@ ml keys new --out user.key
 ```
 
 Writes an Ed25519 key pair as JSON — `algorithm`, `public`, `secret`, hex —
-readable by its owner alone, and never overwrites an existing file. The
+readable by its owner alone on Unix, and never overwrites an existing file. The
 secret is in the clear: this is a sandbox key. Make one for the principal
 (the wallet) and one for each merchant.
 
