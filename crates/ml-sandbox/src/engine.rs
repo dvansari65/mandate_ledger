@@ -15,6 +15,13 @@ use ml_store_postgres::PostgresStore;
 use postgres::{Config, NoTls};
 use r2d2_postgres::PostgresConnectionManager;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
+
+/// How long to keep trying to reach the database. Long enough for a slow
+/// network handshake, short enough that a typo in the URL is not a
+/// thirty-second wait.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The engine as the sandbox assembles it: PostgreSQL, the mock rail, wall
 /// time, and whichever signers the operator named.
@@ -35,7 +42,8 @@ pub struct DbArgs {
 
 /// Whose keys the operator trusts. Without any, every mandate is refused as
 /// untrusted and every signed cart is rejected — as in production, where a
-/// mandate cannot vouch for its own key.
+/// mandate cannot vouch for its own key. Only public keys are read, so the
+/// `.pub` files are enough; the private files are accepted too.
 #[derive(Args)]
 pub struct TrustArgs {
     /// Trust the key in KEYFILE to sign mandates for PRINCIPAL. Repeatable.
@@ -46,6 +54,26 @@ pub struct TrustArgs {
     /// Repeatable.
     #[arg(long = "merchant-key", value_name = "ID=KEYFILE", value_parser = pair)]
     merchant_keys: Vec<(String, PathBuf)>,
+}
+
+/// Keeps the last connection error, which r2d2 otherwise reduces to
+/// "timed out waiting for connection".
+#[derive(Debug)]
+struct LastError(Arc<Mutex<Option<String>>>);
+
+impl r2d2::HandleError<postgres::Error> for LastError {
+    fn handle_error(&self, error: postgres::Error) {
+        // `postgres::Error` displays as "error connecting to server"; the
+        // reason — refused, unknown host, bad password — is in its source.
+        let mut message = error.to_string();
+        let mut source = std::error::Error::source(&error);
+        while let Some(cause) = source {
+            message.push_str(": ");
+            message.push_str(&cause.to_string());
+            source = cause.source();
+        }
+        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(message);
+    }
 }
 
 /// `NAME=FILE`, split at the last `=` so the name may contain one.
@@ -69,10 +97,20 @@ pub fn store(db: &DbArgs) -> Result<PostgresStore, Failure> {
     // One process, one command, one connection. The store's own `connect`
     // sizes its pool for a service; ten sessions to run one transaction
     // would be the wrong shape here.
+    let last_error = Arc::new(Mutex::new(None));
     let pool = r2d2::Pool::builder()
         .max_size(1)
+        .connection_timeout(CONNECT_TIMEOUT)
+        .error_handler(Box::new(LastError(Arc::clone(&last_error))))
         .build(PostgresConnectionManager::new(config, NoTls))
-        .map_err(|e| Failure::undecided(format!("cannot connect to the database: {e}")))?;
+        .map_err(|e| {
+            let cause = last_error
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take()
+                .unwrap_or_else(|| e.to_string());
+            Failure::undecided(format!("cannot connect to the database: {cause}"))
+        })?;
     let store = PostgresStore::from_pool(pool);
     store
         .migrate()
@@ -86,7 +124,7 @@ pub fn signers(trust: &TrustArgs) -> Result<TrustedSigners, Failure> {
     for (principal, file) in &trust.trust {
         let principal = PrincipalId::new(principal.as_str())
             .map_err(|e| Failure::undecided(format!("--trust: {e}")))?;
-        signers = signers.allow(principal, keys::load(file)?.verifying_key().to_bytes());
+        signers = signers.allow(principal, keys::public(file)?.to_bytes());
     }
     Ok(signers)
 }
@@ -95,17 +133,19 @@ pub fn signers(trust: &TrustArgs) -> Result<TrustedSigners, Failure> {
 pub fn adapter(trust: &TrustArgs) -> Result<NativeCartAdapter, Failure> {
     let mut adapter = NativeCartAdapter::new();
     for (id, file) in &trust.merchant_keys {
-        adapter = adapter.with_merchant_key(id.as_str(), keys::load(file)?.verifying_key());
+        adapter = adapter.with_merchant_key(id.as_str(), keys::public(file)?);
     }
     Ok(adapter)
 }
 
-/// The whole engine, for a command that decides something.
+/// The whole engine, for a command that decides something. Local
+/// configuration is checked before the database is touched.
 pub fn ledger(db: &DbArgs, trust: &TrustArgs) -> Result<Engine, Failure> {
+    let signers = signers(trust)?;
     Ok(Ledger::new(
         store(db)?,
         MockRail::new("mock", 1),
-        signers(trust)?,
+        signers,
         SystemClock,
     ))
 }

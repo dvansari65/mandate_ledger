@@ -316,6 +316,9 @@ impl Store for BlindToRevocation {
     fn scan(&self, filter: &RecordFilter, limit: usize) -> Result<Vec<Record>, StoreError> {
         self.0.scan(filter, limit)
     }
+    fn last_seq(&self) -> Result<u64, StoreError> {
+        self.0.last_seq()
+    }
     fn reserved(&self, mandate: &MandateId) -> Result<Option<Money>, StoreError> {
         self.0.reserved(mandate)
     }
@@ -389,6 +392,7 @@ fn the_log_spans_contexts_and_pages_by_seq() {
     );
     assert!(all.windows(2).all(|w| w[0].seq < w[1].seq));
     assert_eq!(ours(2), all, "paging with a small limit reads the same log");
+    assert!(f.store.last_seq().unwrap() >= all.last().unwrap().seq);
     assert!(f.store.events_after(u64::MAX, 10).unwrap().is_empty());
 }
 

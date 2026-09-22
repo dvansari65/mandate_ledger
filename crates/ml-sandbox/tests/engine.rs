@@ -56,15 +56,16 @@ impl Setup {
         sign_cart(&self.dir, name, &cart(total), &self.merchant_key, "bb")
     }
 
-    /// `--database-url`, `--trust` and `--merchant-key` for this setup.
+    /// `--database-url`, `--trust` and `--merchant-key` for this setup —
+    /// trusting the public halves only, as an operator would.
     fn trust_args(&self) -> Vec<String> {
         vec![
             "--database-url".into(),
             self.url.clone(),
             "--trust".into(),
-            format!("{}={}", self.principal, self.user_key.display()),
+            format!("{}={}.pub", self.principal, self.user_key.display()),
             "--merchant-key".into(),
-            format!("bb={}", self.merchant_key.display()),
+            format!("bb={}.pub", self.merchant_key.display()),
         ]
     }
 
@@ -127,6 +128,12 @@ fn authorize_then_read_it_back_from_fresh_processes() {
     let s = Setup::new("authorize", url);
     let cart = s.cart("cart", "128.00");
 
+    // Where the log ends now, before this test writes anything.
+    let (code, out, err) =
+        run(ml().args(["--json", "log", "--limit", "0", "--database-url", &s.url]));
+    assert_eq!(code, 0, "{err}");
+    let now = json(&out)["next"].as_u64().unwrap();
+
     let (code, report, err) = s.authorize(&cart, "order-1", &s.trust_args());
     assert_eq!(code, 0, "{err}");
     assert_eq!(report["state"], "authorized");
@@ -155,21 +162,37 @@ fn authorize_then_read_it_back_from_fresh_processes() {
     assert_eq!(again["context"], ctx);
     assert_eq!(s.contexts().len(), 1, "a replay reserves nothing twice");
 
-    // The global log pages by seq; our chain is in it, in order.
+    // Everything after `now` includes our event, and so does the tail.
     let (code, out, _) = run(ml().args([
         "--json",
         "log",
         "--after",
-        "0",
+        &now.to_string(),
         "--limit",
-        "5",
+        "1000",
         "--database-url",
         &s.url,
     ]));
     assert_eq!(code, 0);
-    let page = json(&out);
-    assert!(page["next"].as_u64().unwrap() >= 1);
-    assert!(page["events"].as_array().unwrap().len() <= 5);
+    let since = json(&out);
+    assert!(
+        since["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["context"] == ctx)
+    );
+    assert!(since["next"].as_u64().unwrap() > now);
+    let (code, out, _) =
+        run(ml().args(["--json", "log", "--limit", "1000", "--database-url", &s.url]));
+    assert_eq!(code, 0);
+    assert!(
+        json(&out)["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["context"] == ctx)
+    );
 }
 
 #[test]
@@ -189,12 +212,7 @@ fn a_refusal_is_a_decision_with_exit_2_and_a_record() {
     let chain = s.chain(&ctx);
     assert_eq!(chain.len(), 1);
     assert_eq!(chain[0]["event"], "denied");
-    assert!(
-        chain[0]["detail"]
-            .as_str()
-            .unwrap()
-            .contains("SCOPE_PER_TXN_EXCEEDED")
-    );
+    assert_eq!(chain[0]["code"], "SCOPE_PER_TXN_EXCEEDED");
     assert!(
         s.contexts().is_empty(),
         "a refused-only context has no record"

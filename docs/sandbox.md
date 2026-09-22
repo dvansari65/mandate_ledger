@@ -34,9 +34,11 @@ ml keys new --out user.key
 ```
 
 Writes an Ed25519 key pair as JSON — `algorithm`, `public`, `secret`, hex —
-readable by its owner alone on Unix, and never overwrites an existing file. The
-secret is in the clear: this is a sandbox key. Make one for the principal
-(the wallet) and one for each merchant.
+to `user.key`, readable by its owner alone on Unix and never overwritten, and
+the public half alone to `user.key.pub`. Anything that only needs to trust a
+key takes the `.pub` file; the private file never has to leave the machine
+that signs with it. The secret is in the clear: this is a sandbox key. Make
+one pair for the principal (the wallet) and one for each merchant.
 
 ## Mandates
 
@@ -87,7 +89,8 @@ export ML_DATABASE_URL=postgres://localhost/mandate_ledger   # or --database-url
 That is the only setting. Each command opens one connection, brings the
 schema up to date (a version check; nothing happens when it is current) and
 exits. Nothing is remembered between two commands except what the database
-holds — which is exactly what a service restarting would see.
+holds — which is exactly what a service restarting would see. A database that
+cannot be reached is an error within five seconds, with the cause.
 
 ## Carts
 
@@ -116,7 +119,7 @@ adds that signature under a key id, and `--merchant-key ID=KEYFILE` on
 
 ```bash
 ml authorize --mandate mandate.json --cart signed-cart.json --request-key order-1 \
-  --trust user:alice=user.key --merchant-key bb-2026=merchant.key
+  --trust user:alice=user.key.pub --merchant-key bb-2026=merchant.key.pub
 ```
 
 Checks the cart against the mandate and reserves its total. Prints the
@@ -145,13 +148,17 @@ reaches the ledger; that is exit `1` and an error, not a recorded refusal.
 ## Log and contexts
 
 ```bash
-ml log                        # the most recent page of the global log
+ml log                        # the most recent 50 events, every context
 ml log --after 120 --limit 20 # page forward; the report's `next` is the cursor
+ml log --limit 0              # nothing but `next`: where the log ends now
 ml log --context ctx_…        # one context's chain, oldest first
 ml contexts --mandate mnd-1 --state authorized
 ```
 
 `ml log` is every event in every context, refusals included, in the order
-the store committed them. `ml contexts` is where each context stands now: a
-context that has only ever been refused has no record — its refusals are in
-the log.
+the store committed them. Each row carries `seq`, `at`, `context`, `event`,
+`code` — the refusal code for a `denied` event, empty otherwise — and
+`detail`. A script that wants everything from a point in time takes `next`
+from `ml log --limit 0` and passes it to `--after` later. `ml contexts` is
+where each context stands now: a context that has only ever been refused has
+no record — its refusals are in the log.

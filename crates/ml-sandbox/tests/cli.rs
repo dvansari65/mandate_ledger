@@ -20,6 +20,17 @@ fn keys_new_writes_a_private_key_and_never_overwrites_it() {
     assert_eq!(file["algorithm"], "ed25519");
     assert_eq!(file["public"], public);
     assert_eq!(file["secret"].as_str().unwrap().len(), 64);
+
+    // The public half is a file of its own, safe to hand to anyone.
+    let public_file = dir.join("user.key.pub");
+    assert_eq!(report["public_file"], public_file.display().to_string());
+    let shared = json(&std::fs::read_to_string(&public_file).unwrap());
+    assert_eq!(shared["algorithm"], "ed25519");
+    assert_eq!(shared["public"], public);
+    assert!(
+        shared.get("secret").is_none(),
+        "the public file carries no secret"
+    );
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
@@ -173,6 +184,26 @@ fn cart_sign_produces_a_cart_the_adapter_accepts() {
         ml_adapters::NativeCartAdapter::new()
             .normalize_cart(&cart)
             .is_err()
+    );
+}
+
+#[test]
+fn an_unreachable_database_fails_fast_and_names_the_cause() {
+    let started = std::time::Instant::now();
+    let (code, _, err) = run(ml().args([
+        "contexts",
+        "--database-url",
+        "postgres://localhost:1/nothing",
+    ]));
+    assert_eq!(code, 1, "{err}");
+    assert!(
+        err.contains("refused"),
+        "the cause, not just a timeout: {err}"
+    );
+    assert!(
+        started.elapsed().as_secs() < 20,
+        "took {:?}",
+        started.elapsed()
     );
 }
 
