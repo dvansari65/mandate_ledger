@@ -10,14 +10,20 @@
 //!   human-readable lines, with the same keys.
 //! - **Exit codes mean something.** `0`: the step was allowed, or the command
 //!   had nothing to decide. `2`: the ledger evaluated the step and refused it
-//!   — a decision, not a failure. `1`: the ledger could not decide, because a
-//!   file, the store or the rail failed. `64`: the command line was wrong.
+//!   — a decision, not a failure; the report on stdout names the context, the
+//!   stage, the code and the reason. `1`: the ledger could not decide, because
+//!   a file, the store or the rail failed. `64`: the command line was wrong.
 //!   Errors go to stderr, prefixed `error:`.
 
 #![forbid(unsafe_code)]
 
+mod authorize;
+mod cart;
+mod contexts;
+mod engine;
 mod files;
 mod keys;
+mod log;
 mod mandate;
 mod report;
 
@@ -48,6 +54,17 @@ enum Command {
         #[command(subcommand)]
         command: mandate::Command,
     },
+    /// Carts: what the agent wants to buy.
+    Cart {
+        #[command(subcommand)]
+        command: cart::Command,
+    },
+    /// Check a cart against a mandate and reserve its total.
+    Authorize(authorize::Cmd),
+    /// Every event in every context, in order — refusals included.
+    Log(log::Cmd),
+    /// Where every context stands now.
+    Contexts(contexts::Cmd),
 }
 
 /// What the shell sees. Scripts branch on these, so they are part of the
@@ -59,9 +76,7 @@ enum Exit {
     Allowed = 0,
     /// The ledger could not decide: a file, the store or the rail failed.
     Undecided = 1,
-    /// The ledger evaluated the step and refused it. No offline command can
-    /// refuse; the engine commands return this.
-    #[allow(dead_code)]
+    /// The ledger evaluated the step and refused it.
     Refused = 2,
     /// The command line was wrong. Distinct from a refusal on purpose: a
     /// script must never mistake a typo for a decision.
@@ -110,6 +125,10 @@ fn main() -> ExitCode {
     let result = match cli.command {
         Command::Keys { command } => keys::run(command),
         Command::Mandate { command } => mandate::run(command),
+        Command::Cart { command } => cart::run(command),
+        Command::Authorize(cmd) => authorize::run(&cmd),
+        Command::Log(cmd) => log::run(&cmd),
+        Command::Contexts(cmd) => contexts::run(&cmd),
     };
 
     match result {
@@ -122,7 +141,7 @@ fn main() -> ExitCode {
                     report.human()
                 }
             );
-            ExitCode::from(Exit::Allowed.code())
+            ExitCode::from(report.exit().code())
         }
         Err(failure) => {
             eprintln!("error: {}", failure.message);

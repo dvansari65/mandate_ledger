@@ -613,7 +613,12 @@ dependencies = [
  "clap",
  "getrandom 0.4.3",
  "hex",
+ "ml-adapters",
  "ml-core",
+ "ml-store-postgres",
+ "postgres",
+ "r2d2",
+ "r2d2_postgres",
  "serde",
  "serde_json",
 ]

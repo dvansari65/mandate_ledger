@@ -8,9 +8,9 @@ rust-version.workspace = true
 
 [dependencies]
 ml-core.workspace = true
-postgres = { version = "0.19", features = ["with-serde_json-1"] }
-r2d2 = "0.8"
-r2d2_postgres = "0.18"
+postgres.workspace = true
+r2d2.workspace = true
+r2d2_postgres.workspace = true
 rust_decimal = { workspace = true, features = ["db-postgres"] }
 serde_json.workspace = true
 

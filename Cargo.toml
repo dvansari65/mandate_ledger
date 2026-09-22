@@ -20,6 +20,10 @@ ml-core = { path = "crates/ml-core", version = "0.0.1" }
 ml-adapters = { path = "crates/ml-adapters", version = "0.0.1" }
 ml-store-postgres = { path = "crates/ml-store-postgres", version = "0.0.1" }
 
+postgres = { version = "0.19", features = ["with-serde_json-1"] }
+r2d2 = "0.8"
+r2d2_postgres = "0.18"
+
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_jcs = "0.2"
@@ -30,7 +34,7 @@ base64 = "0.23"
 ed25519-dalek = "3"
 thiserror = "2"
 proptest = "1"
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 getrandom = "0.4"
 
 [workspace.lints.rust]
