@@ -10,6 +10,7 @@ use ml_core::*;
 #[test]
 fn the_log_spans_contexts_and_pages_by_seq() {
     let h = harness();
+    assert_eq!(h.store.last_seq().unwrap(), 0, "an empty log ends at 0");
     let m = mandate();
     let a = h
         .ledger
@@ -47,6 +48,7 @@ fn the_log_spans_contexts_and_pages_by_seq() {
     }
     assert_eq!(paged, all);
     let end = all.last().unwrap().seq;
+    assert_eq!(h.store.last_seq().unwrap(), end);
     assert!(h.store.events_after(end, 100).unwrap().is_empty());
     assert!(h.store.events_after(0, 0).unwrap().is_empty());
 }

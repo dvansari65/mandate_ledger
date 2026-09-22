@@ -1,61 +1,8 @@
-//! The `ml` binary, driven as a script would drive it.
+//! The offline commands, driven as a script would drive them.
 
-use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+mod common;
 
-fn ml() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_ml"))
-}
-
-/// A fresh directory per test, so tests never see each other's files.
-fn workdir(test: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("ml-sandbox-{test}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
-}
-
-fn run(cmd: &mut Command) -> (i32, String, String) {
-    let Output {
-        status,
-        stdout,
-        stderr,
-    } = cmd.output().unwrap();
-    (
-        status.code().unwrap(),
-        String::from_utf8(stdout).unwrap(),
-        String::from_utf8(stderr).unwrap(),
-    )
-}
-
-fn json(text: &str) -> serde_json::Value {
-    serde_json::from_str(text).unwrap_or_else(|e| panic!("not JSON: {e}\n{text}"))
-}
-
-const BODY: &str = r#"{
-  "id": "mnd-1",
-  "principal": "user:alice",
-  "agent": "agent:shopper",
-  "scope": {
-    "merchants": ["bigbasket.com", "*.zepto.com"],
-    "categories": ["grocery"],
-    "currency": "INR",
-    "max_per_txn": { "amount": "2000.00", "currency": "INR" },
-    "max_total": { "amount": "8000.00", "currency": "INR" },
-    "valid_from": 1800000000,
-    "valid_until": 1802592000,
-    "velocity": { "max_count": 5, "window_secs": 86400 },
-    "min_attestation": "merchant_signed"
-  },
-  "issued_at": 1800000000
-}"#;
-
-fn new_key(dir: &Path) -> PathBuf {
-    let key = dir.join("user.key");
-    let (code, _, err) = run(ml().args(["keys", "new", "--out"]).arg(&key));
-    assert_eq!(code, 0, "{err}");
-    key
-}
+use common::*;
 
 #[test]
 fn keys_new_writes_a_private_key_and_never_overwrites_it() {
@@ -73,6 +20,17 @@ fn keys_new_writes_a_private_key_and_never_overwrites_it() {
     assert_eq!(file["algorithm"], "ed25519");
     assert_eq!(file["public"], public);
     assert_eq!(file["secret"].as_str().unwrap().len(), 64);
+
+    // The public half is a file of its own, safe to hand to anyone.
+    let public_file = dir.join("user.key.pub");
+    assert_eq!(report["public_file"], public_file.display().to_string());
+    let shared = json(&std::fs::read_to_string(&public_file).unwrap());
+    assert_eq!(shared["algorithm"], "ed25519");
+    assert_eq!(shared["public"], public);
+    assert!(
+        shared.get("secret").is_none(),
+        "the public file carries no secret"
+    );
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
@@ -95,7 +53,7 @@ fn keys_new_writes_a_private_key_and_never_overwrites_it() {
 #[test]
 fn mandate_sign_produces_a_mandate_the_engine_verifies() {
     let dir = workdir("sign");
-    let key = new_key(&dir);
+    let key = new_key(&dir, "user.key");
     let body = dir.join("body.json");
     std::fs::write(&body, BODY).unwrap();
     let out = dir.join("mandate.json");
@@ -110,9 +68,8 @@ fn mandate_sign_produces_a_mandate_the_engine_verifies() {
     assert_eq!(code, 0, "{err}");
     assert!(text.contains("mandate    mnd-1\n"), "{text}");
 
-    let mandate: ml_core::Mandate = json(&std::fs::read_to_string(&out).unwrap())
-        .pipe(serde_json::from_value)
-        .unwrap();
+    let mandate: ml_core::Mandate =
+        serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
     mandate
         .verify()
         .expect("the engine accepts what the CLI signed");
@@ -142,7 +99,7 @@ fn mandate_sign_produces_a_mandate_the_engine_verifies() {
 #[test]
 fn a_bad_scope_is_an_error_not_a_refusal() {
     let dir = workdir("bad-scope");
-    let key = new_key(&dir);
+    let key = new_key(&dir, "user.key");
     let body = dir.join("body.json");
     std::fs::write(
         &body,
@@ -168,7 +125,7 @@ fn a_bad_scope_is_an_error_not_a_refusal() {
 #[test]
 fn a_tampered_key_file_is_rejected() {
     let dir = workdir("tampered");
-    let key = new_key(&dir);
+    let key = new_key(&dir, "user.key");
     let mut file = json(&std::fs::read_to_string(&key).unwrap());
     file["public"] = serde_json::Value::String("00".repeat(32));
     std::fs::write(&key, file.to_string()).unwrap();
@@ -197,9 +154,76 @@ fn a_wrong_command_line_is_exit_64_and_help_is_exit_0() {
     assert!(out.contains("mandate-ledger"), "{out}");
 }
 
-trait Pipe: Sized {
-    fn pipe<T>(self, f: impl FnOnce(Self) -> T) -> T {
-        f(self)
-    }
+#[test]
+fn cart_sign_produces_a_cart_the_adapter_accepts() {
+    let dir = workdir("cart-sign");
+    let key = new_key(&dir, "merchant.key");
+    let signed = sign_cart(&dir, "cart", &cart("128.00"), &key, "bb-2026");
+
+    let key_file = json(&std::fs::read_to_string(&key).unwrap());
+    let public: [u8; 32] = hex::decode(key_file["public"].as_str().unwrap())
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let adapter = ml_adapters::NativeCartAdapter::new().with_merchant_key(
+        "bb-2026",
+        ml_core::VerifyingKey::from_bytes(&public).unwrap(),
+    );
+    let cart: ml_adapters::NativeCart =
+        serde_json::from_str(&std::fs::read_to_string(&signed).unwrap()).unwrap();
+    let normalized = adapter
+        .normalize_cart(&cart)
+        .expect("the adapter accepts the signature");
+    assert_eq!(
+        normalized.attestation().level(),
+        ml_core::AttestationLevel::MerchantSigned
+    );
+
+    // Under a key id the adapter does not know, the same cart is rejected.
+    assert!(
+        ml_adapters::NativeCartAdapter::new()
+            .normalize_cart(&cart)
+            .is_err()
+    );
 }
-impl<T> Pipe for T {}
+
+#[test]
+fn an_unreachable_database_fails_fast_and_names_the_cause() {
+    let started = std::time::Instant::now();
+    let (code, _, err) = run(ml().args([
+        "contexts",
+        "--database-url",
+        "postgres://localhost:1/nothing",
+    ]));
+    assert_eq!(code, 1, "{err}");
+    assert!(
+        err.contains("refused"),
+        "the cause, not just a timeout: {err}"
+    );
+    assert!(
+        started.elapsed().as_secs() < 20,
+        "took {:?}",
+        started.elapsed()
+    );
+}
+
+#[test]
+fn no_database_is_an_error_that_says_what_to_set() {
+    let dir = workdir("no-db");
+    let key = new_key(&dir, "user.key");
+    let mandate = sign_mandate(&dir, BODY, &key);
+    // An unsigned cart, so nothing local can fail before the database is needed.
+    let cart_file = dir.join("cart.json");
+    std::fs::write(&cart_file, cart("10.00")).unwrap();
+
+    let (code, _, err) = run(ml()
+        .args(["authorize", "--request-key", "k", "--mandate"])
+        .arg(&mandate)
+        .arg("--cart")
+        .arg(&cart_file));
+    assert_eq!(code, 1, "{err}");
+    assert!(err.contains("ML_DATABASE_URL"), "{err}");
+
+    let (code, _, err) = run(ml().args(["contexts"]));
+    assert_eq!(code, 1, "{err}");
+}

@@ -13,7 +13,12 @@ path = "src/main.rs"
 
 [dependencies]
 ml-core.workspace = true
+ml-adapters.workspace = true
+ml-store-postgres.workspace = true
 clap.workspace = true
+postgres.workspace = true
+r2d2.workspace = true
+r2d2_postgres.workspace = true
 getrandom.workspace = true
 hex.workspace = true
 serde.workspace = true
@@ -21,6 +26,7 @@ serde_json.workspace = true
 
 [dev-dependencies]
 ml-core.workspace = true
+ml-adapters.workspace = true
 
 [lints]
 workspace = true

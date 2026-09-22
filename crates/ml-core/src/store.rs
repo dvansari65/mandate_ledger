@@ -130,6 +130,12 @@ pub trait Store: Send + Sync {
     /// only ever been refused has no record; its refusals are in the log.
     fn scan(&self, filter: &RecordFilter, limit: usize) -> Result<Vec<Record>, StoreError>;
 
+    /// The highest sequence number in the log, or 0 when it is empty. This is
+    /// how a reader finds the tail: `events_after(last_seq - n, n)` is the
+    /// most recent `n` events, and `events_after(last_seq, ..)` is whatever
+    /// happens next.
+    fn last_seq(&self) -> Result<u64, StoreError>;
+
     /// Total currently reserved against `mandate` (live authorizations).
     fn reserved(&self, mandate: &MandateId) -> Result<Option<Money>, StoreError>;
 
@@ -408,6 +414,10 @@ impl Store for MemoryStore {
         Ok(hits)
     }
 
+    fn last_seq(&self) -> Result<u64, StoreError> {
+        Ok(self.lock()?.events.last().map_or(0, |e| e.seq))
+    }
+
     fn reserved(&self, mandate: &MandateId) -> Result<Option<Money>, StoreError> {
         Ok(self.lock()?.reserved.get(mandate).cloned())
     }
@@ -442,6 +452,9 @@ impl<S: Store + ?Sized> Store for std::sync::Arc<S> {
     }
     fn scan(&self, filter: &RecordFilter, limit: usize) -> Result<Vec<Record>, StoreError> {
         (**self).scan(filter, limit)
+    }
+    fn last_seq(&self) -> Result<u64, StoreError> {
+        (**self).last_seq()
     }
     fn reserved(&self, mandate: &MandateId) -> Result<Option<Money>, StoreError> {
         (**self).reserved(mandate)

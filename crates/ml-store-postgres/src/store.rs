@@ -592,6 +592,18 @@ impl Store for PostgresStore {
             .collect()
     }
 
+    fn last_seq(&self) -> Result<u64, StoreError> {
+        // Sequence numbers are assigned in commit order (see `LOCK_LOG`), so
+        // the highest committed one is the true end of the log for a reader.
+        let mut conn = self.pool.get().map_err(backend)?;
+        let seq: i64 = conn
+            .query_one("SELECT coalesce(max(seq), 0) FROM ml_events", &[])
+            .map_err(pg)?
+            .try_get(0)
+            .map_err(pg)?;
+        u64::try_from(seq).map_err(corrupt)
+    }
+
     fn reserved(&self, mandate: &MandateId) -> Result<Option<Money>, StoreError> {
         let mut conn = self.pool.get().map_err(backend)?;
         Self::read_reserved(&mut *conn, mandate)

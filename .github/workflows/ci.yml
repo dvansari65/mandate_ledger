@@ -94,7 +94,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: cargo test -p ml-store-postgres
+      - run: cargo test -p ml-store-postgres -p ml-sandbox
 
   docs:
     name: rustdoc

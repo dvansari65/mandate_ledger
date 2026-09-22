@@ -353,6 +353,9 @@ impl Store for BlindToRevocation {
     fn scan(&self, filter: &RecordFilter, limit: usize) -> Result<Vec<Record>, StoreError> {
         self.0.scan(filter, limit)
     }
+    fn last_seq(&self) -> Result<u64, StoreError> {
+        self.0.last_seq()
+    }
     fn reserved(&self, mandate: &MandateId) -> Result<Option<Money>, StoreError> {
         self.0.reserved(mandate)
     }
