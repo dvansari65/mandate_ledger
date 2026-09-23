@@ -69,7 +69,7 @@ pub use rail::{
 };
 pub use secret::Secret;
 pub use state::{
-    Authorized, Compensated, Delivered, Paid, PaymentState, Resumed, Settled, Settlement,
+    Authorized, Compensated, Delivered, Paid, PaymentState, Reached, Resumed, Settled, Settlement,
     SettlementFailed,
 };
 pub use store::{AppendOutcome, MemoryStore, Record, RecordFilter, Store};

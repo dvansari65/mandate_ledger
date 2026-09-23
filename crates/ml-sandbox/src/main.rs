@@ -19,13 +19,19 @@
 
 mod authorize;
 mod cart;
+mod compensate;
 mod contexts;
+mod deliver;
 mod engine;
+mod expire;
 mod files;
 mod keys;
 mod log;
 mod mandate;
+mod pay;
 mod report;
+mod revoke;
+mod settle;
 
 use clap::{Parser, Subcommand};
 use std::process::ExitCode;
@@ -61,6 +67,18 @@ enum Command {
     },
     /// Check a cart against a mandate and reserve its total.
     Authorize(authorize::Cmd),
+    /// Record a payment proof against an authorized context.
+    Pay(pay::Cmd),
+    /// Ask the rail whether a recorded payment is final.
+    Settle(settle::Cmd),
+    /// Record that the host undid its side effects after a failed settlement.
+    Compensate(compensate::Cmd),
+    /// Record fulfilment of a settled context.
+    Deliver(deliver::Cmd),
+    /// Release an authorization that will not be paid.
+    Expire(expire::Cmd),
+    /// Withdraw a mandate; every later authorization under it is refused.
+    Revoke(revoke::Cmd),
     /// Every event in every context, in order — refusals included.
     Log(log::Cmd),
     /// Where every context stands now.
@@ -127,6 +145,12 @@ fn main() -> ExitCode {
         Command::Mandate { command } => mandate::run(command),
         Command::Cart { command } => cart::run(command),
         Command::Authorize(cmd) => authorize::run(&cmd),
+        Command::Pay(cmd) => pay::run(&cmd),
+        Command::Settle(cmd) => settle::run(&cmd),
+        Command::Compensate(cmd) => compensate::run(&cmd),
+        Command::Deliver(cmd) => deliver::run(&cmd),
+        Command::Expire(cmd) => expire::run(&cmd),
+        Command::Revoke(cmd) => revoke::run(&cmd),
         Command::Log(cmd) => log::run(&cmd),
         Command::Contexts(cmd) => contexts::run(&cmd),
     };

@@ -302,6 +302,36 @@ pub enum Resumed {
     },
 }
 
+/// Every token a context has earned so far: proof of each stage it has
+/// passed through, whatever state it is in now.
+///
+/// A delivered context has earned `Authorized`, `Paid`, `Settled` and
+/// `Delivered`; a compensated one `Authorized`, `Paid`, `SettlementFailed`
+/// and `Compensated`; an expired one only `Authorized`. Returned by
+/// `Ledger::reached`, so a caller holding nothing but a context id — a CLI,
+/// a script, a webhook handler that lost its token — can replay any step it
+/// has a token for and get the engine's own decision, including a recorded
+/// refusal when the step no longer applies.
+#[derive(Clone, Debug)]
+pub struct Reached {
+    /// Where the context is now.
+    pub state: PaymentState,
+    /// Always earned: a context exists only once it was authorized.
+    pub authorized: Authorized,
+    /// Earned by every context that was paid, whatever happened after.
+    pub paid: Option<Paid>,
+    /// Earned by settled and delivered contexts.
+    pub settled: Option<Settled>,
+    /// Earned by contexts whose settlement failed, compensated or not.
+    pub settlement_failed: Option<SettlementFailed>,
+    /// Earned once the host compensated.
+    pub compensated: Option<Compensated>,
+    /// Earned once the merchant delivered.
+    pub delivered: Option<Delivered>,
+    /// The authorization lapsed; nothing beyond `authorized` was earned.
+    pub expired: bool,
+}
+
 impl Resumed {
     /// The state this token represents.
     #[must_use]

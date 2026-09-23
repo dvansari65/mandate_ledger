@@ -18,6 +18,7 @@ use crate::report::Report;
 use crate::{Failure, files, keys};
 use clap::Subcommand;
 use ml_adapters::NativeCart;
+use ml_core::Hash32;
 use std::path::PathBuf;
 
 #[derive(Subcommand)]
@@ -52,11 +53,15 @@ pub fn run(command: Command) -> Result<Report, Failure> {
                 .sign(key_id.as_str(), &key)
                 .map_err(|e| Failure::undecided(format!("cannot sign: {e}")))?;
             files::write_json(&out, &signed)?;
+            let bytes = signed
+                .canonical_bytes()
+                .map_err(|e| Failure::undecided(format!("cannot hash the cart: {e}")))?;
             Ok(Report::new()
                 .with("file", out.display().to_string())
                 .with("merchant", signed.merchant.as_str())
                 .with("total", signed.total.to_string())
-                .with("key_id", key_id))
+                .with("key_id", key_id)
+                .with("hash", Hash32::of(&bytes).to_string()))
         }
     }
 }

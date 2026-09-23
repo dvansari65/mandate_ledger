@@ -21,7 +21,7 @@ use crate::rail::{
     FinalityStatus, PaymentExpectation, Rail, RailError, SettlementExpectation, VerifiedProof,
 };
 use crate::state::{
-    Authorized, Compensated, Delivered, Paid, PaymentState, Resumed, Settled, Settlement,
+    Authorized, Compensated, Delivered, Paid, PaymentState, Reached, Resumed, Settled, Settlement,
     SettlementFailed,
 };
 use crate::store::{AppendOutcome, Record, Store};
@@ -422,24 +422,10 @@ where
         match rec.state {
             PaymentState::Paid => Ok(None),
             PaymentState::Settled | PaymentState::Delivered => {
-                let reference = rec
-                    .settlement_reference
-                    .clone()
-                    .ok_or_else(|| corrupt("settled without reference"))?;
-                Ok(Some(Settlement::Settled(Settled::new(
-                    ctx.clone(),
-                    reference,
-                ))))
+                Ok(Some(Settlement::Settled(settled_from(rec)?)))
             }
             PaymentState::SettlementFailed | PaymentState::Compensated => {
-                let reason = rec
-                    .failure_reason
-                    .clone()
-                    .ok_or_else(|| corrupt("failed without reason"))?;
-                Ok(Some(Settlement::Failed(SettlementFailed::new(
-                    ctx.clone(),
-                    reason,
-                ))))
+                Ok(Some(Settlement::Failed(failed_from(rec)?)))
             }
             other => self.deny(
                 ctx,
@@ -579,39 +565,54 @@ where
         };
         let resumed = match rec.state {
             PaymentState::Authorized => Resumed::Authorized(authorized_from(&rec)),
-            PaymentState::Paid => Resumed::Paid(Paid::new(
-                ctx.clone(),
-                rec.rail
-                    .clone()
-                    .ok_or_else(|| corrupt("paid without rail"))?,
-                rec.payment_reference
-                    .clone()
-                    .ok_or_else(|| corrupt("paid without reference"))?,
-                rec.idempotency_key
-                    .ok_or_else(|| corrupt("paid without idempotency key"))?,
-            )),
-            PaymentState::Settled => Resumed::Settled(Settled::new(
-                ctx.clone(),
-                rec.settlement_reference
-                    .clone()
-                    .ok_or_else(|| corrupt("settled without reference"))?,
-            )),
-            PaymentState::SettlementFailed => Resumed::SettlementFailed(SettlementFailed::new(
-                ctx.clone(),
-                rec.failure_reason
-                    .clone()
-                    .ok_or_else(|| corrupt("failed without reason"))?,
-            )),
+            PaymentState::Paid => Resumed::Paid(paid_from(&rec)?),
+            PaymentState::Settled => Resumed::Settled(settled_from(&rec)?),
+            PaymentState::SettlementFailed => Resumed::SettlementFailed(failed_from(&rec)?),
             PaymentState::Compensated => Resumed::Compensated(Compensated::new(ctx.clone())),
-            PaymentState::Delivered => Resumed::Delivered(Delivered::new(
-                ctx.clone(),
-                rec.receipt_reference
-                    .clone()
-                    .ok_or_else(|| corrupt("delivered without receipt"))?,
-            )),
+            PaymentState::Delivered => Resumed::Delivered(delivered_from(&rec)?),
             PaymentState::Expired => Resumed::Expired { ctx: ctx.clone() },
         };
         Ok(Some(resumed))
+    }
+
+    /// Every token `ctx` has earned so far — see [`Reached`].
+    ///
+    /// Where [`Ledger::resume`] answers "which single step comes next",
+    /// this answers "which steps may be replayed": a paid context still
+    /// holds an `Authorized`, so `record_payment` can be retried through the
+    /// engine and get its idempotent answer — or its recorded refusal, if
+    /// the retry is a different payment.
+    pub fn reached(&self, ctx: &ContextId) -> Result<Option<Reached>, LedgerError> {
+        use PaymentState as S;
+        let Some(rec) = self.store.record(ctx)? else {
+            return Ok(None);
+        };
+        let state = rec.state;
+        let earned = |states: &[S]| states.contains(&state);
+        Ok(Some(Reached {
+            state,
+            authorized: authorized_from(&rec),
+            paid: earned(&[
+                S::Paid,
+                S::Settled,
+                S::SettlementFailed,
+                S::Compensated,
+                S::Delivered,
+            ])
+            .then(|| paid_from(&rec))
+            .transpose()?,
+            settled: earned(&[S::Settled, S::Delivered])
+                .then(|| settled_from(&rec))
+                .transpose()?,
+            settlement_failed: earned(&[S::SettlementFailed, S::Compensated])
+                .then(|| failed_from(&rec))
+                .transpose()?,
+            compensated: (state == S::Compensated).then(|| Compensated::new(ctx.clone())),
+            delivered: (state == S::Delivered)
+                .then(|| delivered_from(&rec))
+                .transpose()?,
+            expired: state == S::Expired,
+        }))
     }
 
     /// Current state of `ctx`, if it exists.
@@ -689,6 +690,49 @@ fn authorized_from(rec: &Record) -> Authorized {
         rec.merchant.clone(),
         rec.amount.clone(),
     )
+}
+
+/// The `Paid` token a record earned. Fails only on a record the engine did
+/// not write: a paid state without the rail's reference.
+fn paid_from(rec: &Record) -> Result<Paid, LedgerError> {
+    Ok(Paid::new(
+        rec.ctx.clone(),
+        rec.rail
+            .clone()
+            .ok_or_else(|| corrupt("paid without rail"))?,
+        rec.payment_reference
+            .clone()
+            .ok_or_else(|| corrupt("paid without reference"))?,
+        rec.idempotency_key
+            .ok_or_else(|| corrupt("paid without idempotency key"))?,
+    ))
+}
+
+fn settled_from(rec: &Record) -> Result<Settled, LedgerError> {
+    Ok(Settled::new(
+        rec.ctx.clone(),
+        rec.settlement_reference
+            .clone()
+            .ok_or_else(|| corrupt("settled without reference"))?,
+    ))
+}
+
+fn failed_from(rec: &Record) -> Result<SettlementFailed, LedgerError> {
+    Ok(SettlementFailed::new(
+        rec.ctx.clone(),
+        rec.failure_reason
+            .clone()
+            .ok_or_else(|| corrupt("failed without reason"))?,
+    ))
+}
+
+fn delivered_from(rec: &Record) -> Result<Delivered, LedgerError> {
+    Ok(Delivered::new(
+        rec.ctx.clone(),
+        rec.receipt_reference
+            .clone()
+            .ok_or_else(|| corrupt("delivered without receipt"))?,
+    ))
 }
 
 fn idempotency_key(ctx: &ContextId, rail: &str, nonce: &str) -> Hash32 {

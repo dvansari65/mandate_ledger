@@ -50,7 +50,8 @@ pub fn run(cmd: &Cmd) -> Result<Report, Failure> {
             .with("state", "authorized")
             .with("mandate", auth.mandate_id().as_str())
             .with("merchant", auth.merchant().as_str())
-            .with("amount", auth.amount().to_string())),
+            .with("amount", auth.amount().to_string())
+            .with("cart_hash", auth.cart_hash().to_string())),
         Err(err) => engine::outcome(&err),
     }
 }
