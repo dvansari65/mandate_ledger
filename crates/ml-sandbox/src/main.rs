@@ -9,11 +9,11 @@
 //! - **`--json`** prints one JSON object on stdout in place of the
 //!   human-readable lines, with the same keys.
 //! - **Exit codes mean something.** `0`: the step was allowed, or the command
-//!   had nothing to decide. `2`: the ledger evaluated the step and refused it
-//!   — a decision, not a failure; the report on stdout names the context, the
-//!   stage, the code and the reason. `1`: the ledger could not decide, because
-//!   a file, the store or the rail failed. `64`: the command line was wrong.
-//!   Errors go to stderr, prefixed `error:`.
+//!   had nothing to decide. `2`: the ledger evaluated the step and refused it,
+//!   or an evidence bundle did not verify — a decision, not a failure; the
+//!   report on stdout names the code and the reason. `1`: the ledger could not
+//!   decide, because a file, the store or the rail failed. `64`: the command
+//!   line was wrong. Errors go to stderr, prefixed `error:`.
 
 #![forbid(unsafe_code)]
 
@@ -23,6 +23,7 @@ mod compensate;
 mod contexts;
 mod deliver;
 mod engine;
+mod evidence;
 mod expire;
 mod files;
 mod keys;
@@ -32,6 +33,7 @@ mod pay;
 mod report;
 mod revoke;
 mod settle;
+mod verify;
 
 use clap::{Parser, Subcommand};
 use std::process::ExitCode;
@@ -83,6 +85,10 @@ enum Command {
     Log(log::Cmd),
     /// Where every context stands now.
     Contexts(contexts::Cmd),
+    /// Export a context's chain as a bundle anyone can verify.
+    Evidence(evidence::Cmd),
+    /// Verify an evidence bundle from a file. Needs no database.
+    Verify(verify::Cmd),
 }
 
 /// What the shell sees. Scripts branch on these, so they are part of the
@@ -153,6 +159,8 @@ fn main() -> ExitCode {
         Command::Revoke(cmd) => revoke::run(&cmd),
         Command::Log(cmd) => log::run(&cmd),
         Command::Contexts(cmd) => contexts::run(&cmd),
+        Command::Evidence(cmd) => evidence::run(&cmd),
+        Command::Verify(cmd) => verify::run(&cmd),
     };
 
     match result {

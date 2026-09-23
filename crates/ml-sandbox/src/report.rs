@@ -43,6 +43,13 @@ impl Report {
         self.exit
     }
 
+    /// Mark this report as a refusal. For a command that learns the answer
+    /// only after it has gathered the facts.
+    pub fn refuse(mut self) -> Self {
+        self.exit = Exit::Refused;
+        self
+    }
+
     /// Add a fact. Labels are the JSON keys, so keep them short and stable.
     pub fn with(mut self, label: &'static str, value: impl Into<Value>) -> Self {
         self.items.push(Item::Fact(label, value.into()));

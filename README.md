@@ -224,6 +224,7 @@ site/                      landing page (Next.js, TypeScript)
 docs/threat-model.md       what is prevented, bounded, and out of scope
 docs/integration.md        how a merchant, gateway or wallet wires this in
 docs/sandbox.md            the ml command, its files and its exit codes
+docs/roadmap.md            what remains, in order, and why
 ```
 
 ## Development

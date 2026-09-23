@@ -565,3 +565,65 @@ fn a_step_on_an_unknown_context_is_refused_without_a_record() {
     assert_eq!(r["recorded"], false);
     assert!(s.chain("ctx_nope").is_empty());
 }
+
+#[test]
+fn evidence_exported_from_the_ledger_verifies_without_it() {
+    let Some(url) = database() else { return };
+    let s = Setup::new("evidence", url);
+    let pay1 = s.reference("pay-1");
+    let ctx = s.authorized(&s.cart("cart", "10.00"), "o1");
+    for step in [
+        vec!["pay", &ctx, "--reference", &pay1, "--amount", "10.00 INR"],
+        vec!["settle", &ctx, "--confirmations", "1"],
+        vec!["deliver", &ctx, "--receipt", "R"],
+    ] {
+        let (code, _, err) = s.step(&step);
+        assert_eq!(code, 0, "{err}");
+    }
+
+    let bundle = s.dir.join("bundle.json");
+    let (code, r, err) = s.step(&["evidence", &ctx, "--out", bundle.to_str().unwrap()]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(r["events"], 4);
+    assert_eq!(r["final_state"], "delivered");
+
+    // Signed by the host: the file names who exported it.
+    let host = new_key(&s.dir, "host.key");
+    let signed = s.dir.join("signed.json");
+    let (code, r, err) = s.step(&[
+        "evidence",
+        &ctx,
+        "--out",
+        signed.to_str().unwrap(),
+        "--sign",
+        host.to_str().unwrap(),
+    ]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(r["signed_by"].as_str().unwrap().len(), 64);
+
+    // Verification takes no database flags at all.
+    for (file, extra) in [
+        (&bundle, vec![]),
+        (
+            &signed,
+            vec!["--signer", s.dir.join("host.key.pub").to_str().unwrap()],
+        ),
+    ] {
+        let (code, out, err) = run(ml().args(["--json", "verify"]).arg(file).args(&extra));
+        assert_eq!(code, 0, "{err}");
+        let r = json(&out);
+        assert_eq!(r["verified"], true);
+        assert_eq!(r["context"], ctx);
+        assert_eq!(r["events"], 4);
+    }
+
+    // No such context: an error, not a refusal — there is no decision here.
+    let (code, _, err) = s.step(&[
+        "evidence",
+        "ctx_nope",
+        "--out",
+        s.dir.join("x.json").to_str().unwrap(),
+    ]);
+    assert_eq!(code, 1, "{err}");
+    assert!(err.contains("no such context"), "{err}");
+}

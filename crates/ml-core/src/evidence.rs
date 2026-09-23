@@ -134,7 +134,9 @@ impl SignedEvidence {
     }
 }
 
-/// Why a bundle failed verification.
+/// Why a bundle failed verification. [`EvidenceError::code`] is the stable,
+/// machine-readable form; [`EvidenceError::seq`] names the event where the
+/// check failed, when there is one.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum EvidenceError {
     /// No events.
@@ -170,4 +172,32 @@ pub enum EvidenceError {
     /// Canonicalization failed.
     #[error(transparent)]
     Canonicalize(#[from] CanonicalizeError),
+}
+
+impl EvidenceError {
+    /// Stable machine-readable code.
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::Empty => "EMPTY",
+            Self::WrongContext { .. } => "WRONG_CONTEXT",
+            Self::BrokenChain { .. } => "BROKEN_CHAIN",
+            Self::HashMismatch { .. } => "HASH_MISMATCH",
+            Self::SequenceNotIncreasing { .. } => "SEQUENCE_NOT_INCREASING",
+            Self::SignatureInvalid => "SIGNATURE_INVALID",
+            Self::Canonicalize(_) => "CANONICALIZE",
+        }
+    }
+
+    /// The event the check failed at, when the failure has one.
+    #[must_use]
+    pub const fn seq(&self) -> Option<u64> {
+        match self {
+            Self::WrongContext { seq }
+            | Self::BrokenChain { seq }
+            | Self::HashMismatch { seq }
+            | Self::SequenceNotIncreasing { seq } => Some(*seq),
+            Self::Empty | Self::SignatureInvalid | Self::Canonicalize(_) => None,
+        }
+    }
 }
