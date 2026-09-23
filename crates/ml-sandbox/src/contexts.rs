@@ -61,7 +61,7 @@ pub fn run(cmd: &Cmd) -> Result<Report, Failure> {
 fn row(record: &Record) -> Vec<Value> {
     vec![
         record.ctx.as_str().into(),
-        serde_json::to_value(record.state).expect("a state serializes"),
+        engine::state_name(record.state).into(),
         record.mandate_id.as_str().into(),
         record.merchant.as_str().into(),
         record.amount.to_string().into(),

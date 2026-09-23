@@ -10,7 +10,10 @@ use crate::report::Report;
 use crate::{Failure, keys};
 use clap::Args;
 use ml_adapters::{MockRail, NativeCartAdapter};
-use ml_core::{Denied, Ledger, LedgerError, PrincipalId, SystemClock, TrustedSigners};
+use ml_core::{
+    ContextId, Denied, DenyReason, Ledger, LedgerError, Money, PaymentState, PrincipalId, Reached,
+    Stage, SystemClock, TrustedSigners,
+};
 use ml_store_postgres::PostgresStore;
 use postgres::{Config, NoTls};
 use r2d2_postgres::PostgresConnectionManager;
@@ -151,8 +154,8 @@ pub fn ledger(db: &DbArgs, trust: &TrustArgs) -> Result<Engine, Failure> {
 }
 
 /// What an engine error means to the shell. A refusal is a report — the
-/// ledger decided — and exits 2. Anything else means it could not decide:
-/// exit 1, and the message says why.
+/// ledger decided, and wrote the decision down — and exits 2. Anything else
+/// means it could not decide: exit 1, and the message says why.
 pub fn outcome(err: &LedgerError) -> Result<Report, Failure> {
     match err.denied() {
         Some(Denied {
@@ -164,7 +167,55 @@ pub fn outcome(err: &LedgerError) -> Result<Report, Failure> {
             .with("context", ctx.as_str())
             .with("stage", stage.to_string())
             .with("refused", reason.code())
-            .with("detail", detail.as_str())),
+            .with("detail", detail.as_str())
+            .with("recorded", true)),
         None => Err(Failure::undecided(err.to_string())),
     }
+}
+
+/// A step the engine cannot even be asked about: the context does not
+/// exist, or never earned the token the step needs — a delivery on a
+/// context that was never settled has no `Settled` to present. Refused
+/// here with the engine's own code for it, and marked as not recorded,
+/// because the type system said no before the ledger could.
+pub fn unreachable(
+    ctx: &ContextId,
+    stage: Stage,
+    reason: DenyReason,
+    detail: impl Into<String>,
+) -> Report {
+    Report::refused()
+        .with("context", ctx.as_str())
+        .with("stage", stage.to_string())
+        .with("refused", reason.code())
+        .with("detail", detail.into())
+        .with("recorded", false)
+}
+
+/// A context id from the command line.
+pub fn context(s: &str) -> Result<ContextId, Failure> {
+    ContextId::new(s).map_err(|e| Failure::undecided(format!("context: {e}")))
+}
+
+/// The tokens `ctx` has earned, if it exists.
+pub fn reached(ledger: &Engine, ctx: &ContextId) -> Result<Option<Reached>, Failure> {
+    ledger
+        .reached(ctx)
+        .map_err(|e| Failure::undecided(e.to_string()))
+}
+
+/// The engine's own spelling of a state — its wire form.
+pub fn state_name(state: PaymentState) -> String {
+    serde_json::to_value(state)
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .unwrap_or_default()
+}
+
+/// `AMOUNT CURRENCY`, as the engine prints money: `128.00 INR`.
+pub fn money(s: &str) -> Result<Money, String> {
+    let (amount, currency) = s
+        .split_once(' ')
+        .ok_or_else(|| format!("expected `AMOUNT CURRENCY`, e.g. `128.00 INR`, got `{s}`"))?;
+    Money::parse(amount, currency).map_err(|e| e.to_string())
 }

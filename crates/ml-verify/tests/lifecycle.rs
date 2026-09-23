@@ -307,3 +307,84 @@ fn settlement_replays_from_every_later_state() {
     assert_eq!(again.reason(), "reverted");
     assert_eq!(h.ledger.evidence(b.ctx()).unwrap().unwrap().events.len(), 4);
 }
+
+#[test]
+fn reached_hands_back_every_token_a_context_earned() {
+    let h = harness();
+    let m = mandate();
+    let a = h
+        .ledger
+        .authorize(&m, &cart("bigbasket.com", "10"), "o1")
+        .unwrap();
+    let ctx = a.ctx().clone();
+    let proof = MockProof::bound_to(&ctx, "pay", inr("10"));
+    let p = h.ledger.record_payment(&a, &proof).unwrap();
+    let Settlement::Settled(s) = h
+        .ledger
+        .record_settlement(&p, &MockFinality::confirmed("pay", 1))
+        .unwrap()
+    else {
+        panic!()
+    };
+    let receipt = DeliveryReceipt {
+        reference: "r".into(),
+        attestation: Attestation::AgentReported,
+    };
+    h.ledger.record_delivery(&s, receipt).unwrap();
+
+    let r = h.ledger.reached(&ctx).unwrap().expect("the context exists");
+    assert_eq!(r.state, PaymentState::Delivered);
+    assert!(r.paid.is_some() && r.settled.is_some() && r.delivered.is_some());
+    assert!(r.settlement_failed.is_none() && r.compensated.is_none() && !r.expired);
+
+    // Holding only a context id, every step replays through the engine …
+    let again = h.ledger.record_payment(&r.authorized, &proof).unwrap();
+    assert_eq!(again.idempotency_key(), p.idempotency_key());
+    assert!(matches!(
+        h.ledger
+            .record_settlement(r.paid.as_ref().unwrap(), &MockFinality::confirmed("pay", 1))
+            .unwrap(),
+        Settlement::Settled(_)
+    ));
+    // … and a step that no longer applies is the engine's refusal, recorded.
+    let err = h.ledger.expire(&r.authorized).unwrap_err();
+    assert_eq!(reason(&err), DenyReason::InvalidState);
+    assert_eq!(h.ledger.evidence(&ctx).unwrap().unwrap().events.len(), 5);
+
+    assert!(
+        h.ledger
+            .reached(&ContextId::new("ctx_nope").unwrap())
+            .unwrap()
+            .is_none()
+    );
+
+    // The failure path earns different tokens.
+    let b = h
+        .ledger
+        .authorize(&m, &cart("bigbasket.com", "10"), "o2")
+        .unwrap();
+    let p = h
+        .ledger
+        .record_payment(&b, &MockProof::bound_to(b.ctx(), "pay-b", inr("10")))
+        .unwrap();
+    let Settlement::Failed(f) = h
+        .ledger
+        .record_settlement(&p, &MockFinality::failed("pay-b", "reverted"))
+        .unwrap()
+    else {
+        panic!()
+    };
+    h.ledger.compensate(&f, None).unwrap();
+    let r = h.ledger.reached(b.ctx()).unwrap().unwrap();
+    assert!(r.paid.is_some() && r.settlement_failed.is_some() && r.compensated.is_some());
+    assert!(r.settled.is_none() && r.delivered.is_none());
+
+    // An expired one earned nothing beyond its authorization.
+    let c = h
+        .ledger
+        .authorize(&m, &cart("bigbasket.com", "10"), "o3")
+        .unwrap();
+    h.ledger.expire(&c).unwrap();
+    let r = h.ledger.reached(c.ctx()).unwrap().unwrap();
+    assert!(r.expired && r.paid.is_none());
+}

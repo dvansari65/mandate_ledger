@@ -136,14 +136,69 @@ That is how production works, and the sandbox does not relax it.
 A refusal is exit `2` and a report:
 
 ```
-context  ctx_3ea14003a08a0378c251260d414ad731
-stage    authorize
-refused  SCOPE_PER_TXN_EXCEEDED
-detail   total 3000.00 INR exceeds per-transaction cap 2000.00 INR
+context   ctx_3ea14003a08a0378c251260d414ad731
+stage     authorize
+refused   SCOPE_PER_TXN_EXCEEDED
+detail    total 3000.00 INR exceeds per-transaction cap 2000.00 INR
+recorded  true
 ```
 
 A cart the adapter rejects — a bad or unknown merchant signature — never
 reaches the ledger; that is exit `1` and an error, not a recorded refusal.
+
+## Pay, settle, deliver
+
+Every later step takes the context id from `ml authorize`. Each command is
+a new process: it reads the context back from the database, presents the
+token the step needs, and reports the engine's decision.
+
+```bash
+ml pay ctx_… --reference pay-1 --amount "128.00 INR"
+ml settle ctx_… --confirmations 1            # or: --failed reverted
+ml deliver ctx_… --receipt BB-88121 --signed-by bb-2026
+```
+
+`pay` records the mock rail's proof. Its flags are what a real rail would
+decide for itself, and they are how the attack scripts drive the engine:
+`--nonce` (defaults to the reference; present one for a second context to
+replay a payment), `--bound-cart HASH` (the hash of another cart is a swap —
+`ml cart sign` and `ml authorize` both print the hash), `--unbound`,
+`--invalid`. Every one of them is refused by the engine, not by the command.
+
+`settle` asks the rail for finality: `--confirmations N` is final at 1 and
+`pending` below that — nothing is recorded, ask again later — and
+`--failed REASON` releases the reservation. `--reference` presents evidence
+about another payment, which is refused. After a failure:
+
+```bash
+ml compensate ctx_… --reference refund-1
+```
+
+`deliver` needs a settled context: the engine's `record_delivery` takes a
+`Settled` token and nothing else. On any other context the command has
+nothing to present, and says so — see below.
+
+## Expire and revoke
+
+```bash
+ml expire ctx_…      # release an authorization that will not be paid
+ml revoke mnd-1      # every later authorization under the mandate is refused
+```
+
+## Replays, and refusals the ledger never sees
+
+Every step replays. `pay` with the same proof, `settle` after delivery,
+`deliver` twice: the engine answers as it did the first time and adds nothing
+to the chain. A *different* payment against a paid context, or expiring a
+context that has moved on, is the engine's refusal, recorded, and the report
+says `recorded  true`.
+
+Some refusals never reach the ledger: a step on a context that does not
+exist, or one the context never earned the token for — a delivery before
+settlement, a settlement of a context that was never paid. The type system
+says no before the engine can be asked, so there is no event to record. The
+report carries the engine's code for it (`INVALID_STATE`,
+`CONTEXT_NOT_FOUND`) and `recorded  false`.
 
 ## Log and contexts
 
