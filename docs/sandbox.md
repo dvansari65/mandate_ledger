@@ -23,7 +23,7 @@ Every command follows these, and scripts rely on them.
   | Code | Meaning |
   |---|---|
   | `0` | The step was allowed, or the command had nothing to decide. |
-  | `2` | The ledger evaluated the step and **refused** it. A decision, not a failure; the report names the context, the stage, the code and the reason. |
+  | `2` | The ledger evaluated the step and **refused** it, or an evidence bundle did not verify. A decision, not a failure; the report names the code and the reason. |
   | `1` | The ledger could not decide: a file, the store or the rail failed. Fix the cause and retry. |
   | `64` | The command line was wrong. Distinct from a refusal on purpose. |
 
@@ -217,3 +217,35 @@ the store committed them. Each row carries `seq`, `at`, `context`, `event`,
 from `ml log --limit 0` and passes it to `--after` later. `ml contexts` is
 where each context stands now: a context that has only ever been refused has
 no record — its refusals are in the log.
+
+## Evidence
+
+```bash
+ml evidence ctx_… --out bundle.json                  # the chain, as a file
+ml evidence ctx_… --out bundle.json --sign host.key  # signed by the exporting host
+ml verify bundle.json                                # no database, no network
+ml verify bundle.json --signer host.key.pub          # and it must be this host's
+```
+
+`ml evidence` exports a context's whole chain — every event, hashes and all
+— as a bundle. Signed with the host's key, the file also names who exported
+it. `ml verify` recomputes every hash and follows every link, and checks the
+signature if there is one, from nothing but the file: it takes no database
+flags, and it runs on a machine that has never seen the ledger. That is the
+claim "anyone can verify it without your database", made runnable.
+
+A bundle that does not verify is exit `2`, with the code and the event it
+failed at — `event` is the sequence number, as it appears in the file:
+`HASH_MISMATCH` (an event no longer matches its hash), `BROKEN_CHAIN` (an
+event was removed or reordered), `SEQUENCE_NOT_INCREASING`, `WRONG_CONTEXT`,
+`EMPTY`, `UNSUPPORTED_VERSION` (a format this build does not know is refused,
+not checked with the wrong rules), or `SIGNATURE_INVALID` — which also covers
+a bundle signed by someone other than `--signer`, and a bundle with no
+signature when `--signer` is given. A file that is not a bundle at all is an
+error, exit `1`.
+
+The chain check catches an edit to any event. It cannot catch an edit that
+recomputes every hash afterwards — hashes have no secret in them, so anyone
+can rebuild a consistent chain. That is what the signature is for: a
+re-hashed bundle is intact by the chain's rules and fails the host's
+signature. Sign what you hand to a third party.

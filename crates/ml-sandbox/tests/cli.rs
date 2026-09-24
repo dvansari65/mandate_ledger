@@ -3,6 +3,7 @@
 mod common;
 
 use common::*;
+use std::path::Path;
 
 #[test]
 fn keys_new_writes_a_private_key_and_never_overwrites_it() {
@@ -226,4 +227,188 @@ fn no_database_is_an_error_that_says_what_to_set() {
 
     let (code, _, err) = run(ml().args(["contexts"]));
     assert_eq!(code, 1, "{err}");
+}
+
+/// A four-event chain built entirely in memory: what a bundle exported
+/// elsewhere looks like to a machine that has never seen the database.
+fn bundle_in_memory() -> ml_core::EvidenceBundle {
+    use ml_adapters::{MockFinality, MockProof, MockRail, NativeCart, NativeCartAdapter};
+    use ml_core::*;
+
+    let key = SigningKey::from_bytes(&[7u8; 32]);
+    let body = MandateBody {
+        id: MandateId::new("mnd-1").unwrap(),
+        principal: PrincipalId::new("user:alice").unwrap(),
+        agent: AgentId::new("agent:shopper").unwrap(),
+        scope: Scope {
+            merchants: vec![MerchantPattern::parse("bigbasket.com").unwrap()],
+            categories: None,
+            currency: Currency::new("INR").unwrap(),
+            max_per_txn: None,
+            max_total: None,
+            valid_from: Timestamp(0),
+            valid_until: Timestamp(i64::MAX),
+            velocity: None,
+            min_attestation: AttestationLevel::AgentReported,
+        },
+        issued_at: Timestamp(0),
+        parent: None,
+    };
+    let mandate = Mandate::sign(body, &key).unwrap();
+    let cart = NativeCartAdapter::new()
+        .normalize_cart(&NativeCart {
+            merchant: "bigbasket.com".into(),
+            total: Money::parse("50.00", "INR").unwrap(),
+            category: None,
+            items: vec![],
+            attestation: None,
+        })
+        .unwrap();
+    let ledger = Ledger::new(
+        MemoryStore::new(),
+        MockRail::new("mock", 1),
+        AcceptAnySigner,
+        FixedClock::at(1_700_000_000),
+    );
+    let a = ledger.authorize(&mandate, &cart, "o1").unwrap();
+    let paid = ledger
+        .record_payment(
+            &a,
+            &MockProof::bound_to(a.ctx(), "pay", Money::parse("50.00", "INR").unwrap()),
+        )
+        .unwrap();
+    let Settlement::Settled(settled) = ledger
+        .record_settlement(&paid, &MockFinality::confirmed("pay", 1))
+        .unwrap()
+    else {
+        panic!("expected settled");
+    };
+    let receipt = DeliveryReceipt {
+        reference: "r".into(),
+        attestation: Attestation::AgentReported,
+    };
+    ledger.record_delivery(&settled, receipt).unwrap();
+    ledger.evidence(a.ctx()).unwrap().unwrap()
+}
+
+fn verify(file: &Path, extra: &[&str]) -> (i32, serde_json::Value, String) {
+    let (code, out, err) = run(ml().args(["--json", "verify"]).arg(file).args(extra));
+    let report = if out.is_empty() {
+        serde_json::Value::Null
+    } else {
+        json(&out)
+    };
+    (code, report, err)
+}
+
+#[test]
+fn verify_checks_a_bundle_with_no_database_and_names_the_broken_event() {
+    let dir = workdir("verify");
+    let bundle = bundle_in_memory();
+    let file = dir.join("bundle.json");
+    std::fs::write(&file, serde_json::to_string_pretty(&bundle).unwrap()).unwrap();
+
+    let (code, r, err) = verify(&file, &[]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(r["verified"], true);
+    assert_eq!(r["events"], 4);
+    assert_eq!(r["final_state"], "delivered");
+    assert_eq!(r["signed"], false);
+
+    // An altered amount: the event's hash no longer matches its contents.
+    let mut tampered: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    tampered["events"][1]["body"]["amount"]["amount"] = "5000.00".into();
+    let altered = dir.join("altered.json");
+    std::fs::write(&altered, tampered.to_string()).unwrap();
+    let (code, r, _) = verify(&altered, &[]);
+    assert_eq!(code, 2);
+    assert_eq!(r["verified"], false);
+    assert_eq!(r["refused"], "HASH_MISMATCH");
+    assert_eq!(r["event"], 2);
+
+    // A removed event: the next one's prev_hash points at nothing.
+    let mut cut: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    cut["events"].as_array_mut().unwrap().remove(1);
+    let shortened = dir.join("shortened.json");
+    std::fs::write(&shortened, cut.to_string()).unwrap();
+    let (code, r, _) = verify(&shortened, &[]);
+    assert_eq!(code, 2);
+    assert_eq!(r["refused"], "BROKEN_CHAIN");
+    assert_eq!(r["event"], 3);
+
+    // A format this build does not know is refused, not checked.
+    let mut future: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    future["version"] = 2.into();
+    let unknown = dir.join("future.json");
+    std::fs::write(&unknown, future.to_string()).unwrap();
+    let (code, r, _) = verify(&unknown, &[]);
+    assert_eq!(code, 2);
+    assert_eq!(r["refused"], "UNSUPPORTED_VERSION");
+
+    // Not a bundle at all is an error, not a verdict — and the error says
+    // what is missing.
+    let junk = dir.join("junk.json");
+    std::fs::write(&junk, "{\"hello\": 1}").unwrap();
+    let (code, _, err) = verify(&junk, &[]);
+    assert_eq!(code, 1, "{err}");
+    assert!(err.contains("missing field"), "{err}");
+}
+
+#[test]
+fn verify_checks_who_signed_a_bundle() {
+    let dir = workdir("verify-signed");
+    let host = new_key(&dir, "host.key");
+    let other = new_key(&dir, "other.key");
+    let host_secret: [u8; 32] = hex::decode(
+        json(&std::fs::read_to_string(&host).unwrap())["secret"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap()
+    .try_into()
+    .unwrap();
+    let signed = bundle_in_memory()
+        .sign(&ml_core::SigningKey::from_bytes(&host_secret))
+        .unwrap();
+    let file = dir.join("signed.json");
+    std::fs::write(&file, serde_json::to_string_pretty(&signed).unwrap()).unwrap();
+
+    let (code, r, err) = verify(&file, &[]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(r["signed"], true);
+    assert_eq!(r["signer"], hex::encode(signed.signer));
+
+    // Requiring a signer of a bundle that has none is a refusal, not a pass.
+    let bare = dir.join("bare.json");
+    std::fs::write(&bare, serde_json::to_string(&signed.bundle).unwrap()).unwrap();
+    let (code, r, _) = verify(&bare, &["--signer", &format!("{}.pub", host.display())]);
+    assert_eq!(code, 2);
+    assert_eq!(r["refused"], "SIGNATURE_INVALID");
+    assert!(r["detail"].as_str().unwrap().contains("not signed"));
+
+    // The exporter you expect, from its public key alone.
+    let host_pub = format!("{}.pub", host.display());
+    let (code, r, err) = verify(&file, &["--signer", &host_pub]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(r["verified"], true);
+
+    // A different expected exporter is refused, naming both keys.
+    let other_pub = format!("{}.pub", other.display());
+    let (code, r, _) = verify(&file, &["--signer", &other_pub]);
+    assert_eq!(code, 2);
+    assert_eq!(r["refused"], "SIGNATURE_INVALID");
+    assert!(r["detail"].as_str().unwrap().contains("expected"));
+
+    // Tampering with a signed bundle fails the signature, not just the chain.
+    let mut forged: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    forged["bundle"]["generated_at"] = 0.into();
+    let forged_file = dir.join("forged.json");
+    std::fs::write(&forged_file, forged.to_string()).unwrap();
+    let (code, r, _) = verify(&forged_file, &[]);
+    assert_eq!(code, 2);
+    assert_eq!(r["refused"], "SIGNATURE_INVALID");
 }

@@ -41,7 +41,15 @@ impl EvidenceBundle {
     }
 
     /// Recompute the hash chain and confirm it is intact.
+    ///
+    /// A bundle in a format this build does not know is refused rather than
+    /// checked with the wrong rules.
     pub fn verify(&self) -> Result<(), EvidenceError> {
+        if self.version != EVIDENCE_VERSION {
+            return Err(EvidenceError::UnsupportedVersion {
+                version: self.version,
+            });
+        }
         if self.events.is_empty() {
             return Err(EvidenceError::Empty);
         }
@@ -134,9 +142,17 @@ impl SignedEvidence {
     }
 }
 
-/// Why a bundle failed verification.
+/// Why a bundle failed verification. [`EvidenceError::code`] is the stable,
+/// machine-readable form; [`EvidenceError::seq`] names the event where the
+/// check failed, when there is one.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum EvidenceError {
+    /// The bundle declares a format version this build does not understand.
+    #[error("unsupported bundle version {version}")]
+    UnsupportedVersion {
+        /// The version the bundle declares.
+        version: u16,
+    },
     /// No events.
     #[error("bundle is empty")]
     Empty,
@@ -170,4 +186,36 @@ pub enum EvidenceError {
     /// Canonicalization failed.
     #[error(transparent)]
     Canonicalize(#[from] CanonicalizeError),
+}
+
+impl EvidenceError {
+    /// Stable machine-readable code.
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::UnsupportedVersion { .. } => "UNSUPPORTED_VERSION",
+            Self::Empty => "EMPTY",
+            Self::WrongContext { .. } => "WRONG_CONTEXT",
+            Self::BrokenChain { .. } => "BROKEN_CHAIN",
+            Self::HashMismatch { .. } => "HASH_MISMATCH",
+            Self::SequenceNotIncreasing { .. } => "SEQUENCE_NOT_INCREASING",
+            Self::SignatureInvalid => "SIGNATURE_INVALID",
+            Self::Canonicalize(_) => "CANONICALIZE",
+        }
+    }
+
+    /// The event the check failed at, when the failure has one.
+    #[must_use]
+    pub const fn seq(&self) -> Option<u64> {
+        match self {
+            Self::WrongContext { seq }
+            | Self::BrokenChain { seq }
+            | Self::HashMismatch { seq }
+            | Self::SequenceNotIncreasing { seq } => Some(*seq),
+            Self::UnsupportedVersion { .. }
+            | Self::Empty
+            | Self::SignatureInvalid
+            | Self::Canonicalize(_) => None,
+        }
+    }
 }

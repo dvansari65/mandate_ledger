@@ -47,7 +47,7 @@ pub struct DbArgs {
 /// untrusted and every signed cart is rejected — as in production, where a
 /// mandate cannot vouch for its own key. Only public keys are read, so the
 /// `.pub` files are enough; the private files are accepted too.
-#[derive(Args)]
+#[derive(Args, Default)]
 pub struct TrustArgs {
     /// Trust the key in KEYFILE to sign mandates for PRINCIPAL. Repeatable.
     #[arg(long = "trust", value_name = "PRINCIPAL=KEYFILE", value_parser = pair)]

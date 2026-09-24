@@ -55,20 +55,18 @@ fn altered_amount_is_detected() {
         panic!()
     };
     *amount = inr("5000");
-    assert_eq!(
-        b.verify().unwrap_err(),
-        EvidenceError::HashMismatch { seq: 2 }
-    );
+    let err = b.verify().unwrap_err();
+    assert_eq!(err, EvidenceError::HashMismatch { seq: 2 });
+    assert_eq!((err.code(), err.seq()), ("HASH_MISMATCH", Some(2)));
 }
 
 #[test]
 fn removed_event_is_detected() {
     let (_h, mut b) = delivered_bundle();
     b.events.remove(1);
-    assert_eq!(
-        b.verify().unwrap_err(),
-        EvidenceError::BrokenChain { seq: 3 }
-    );
+    let err = b.verify().unwrap_err();
+    assert_eq!(err, EvidenceError::BrokenChain { seq: 3 });
+    assert_eq!((err.code(), err.seq()), ("BROKEN_CHAIN", Some(3)));
 }
 
 #[test]
@@ -87,8 +85,16 @@ fn signed_bundle_binds_exporter() {
 
     let mut forged = signed.clone();
     forged.bundle.generated_at = Timestamp(0);
-    assert_eq!(
-        forged.verify().unwrap_err(),
-        EvidenceError::SignatureInvalid
-    );
+    let err = forged.verify().unwrap_err();
+    assert_eq!(err, EvidenceError::SignatureInvalid);
+    assert_eq!((err.code(), err.seq()), ("SIGNATURE_INVALID", None));
+}
+
+#[test]
+fn an_unknown_format_version_is_refused_not_checked() {
+    let (_h, mut b) = delivered_bundle();
+    b.version = 2;
+    let err = b.verify().unwrap_err();
+    assert_eq!(err, EvidenceError::UnsupportedVersion { version: 2 });
+    assert_eq!((err.code(), err.seq()), ("UNSUPPORTED_VERSION", None));
 }
