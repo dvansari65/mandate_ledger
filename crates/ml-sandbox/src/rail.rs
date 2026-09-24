@@ -47,6 +47,12 @@ enum Magic {
     Reorg,
 }
 
+/// What the rail saw when asked about a payment.
+enum Observation {
+    Confirmations(u32),
+    Failed(String),
+}
+
 fn magic(reference: &str) -> Option<Magic> {
     if reference.ends_with("-ok") {
         Some(Magic::Ok)
@@ -66,24 +72,25 @@ impl SandboxRail {
         Self { id, finality, pool }
     }
 
-    /// How many confirmations the rail reports, or the failure it reports.
-    fn observe(&self, finality: &Finality) -> Result<Result<u32, String>, RailError> {
+    /// What the rail reports about a payment: as told, or as the reference
+    /// dictates. Only a reference it has no way to answer is an error.
+    fn observe(&self, finality: &Finality) -> Result<Observation, RailError> {
         Ok(match &finality.reported {
-            Some(Reported::Confirmations(n)) => Ok(*n),
-            Some(Reported::Failed(reason)) => Err(reason.clone()),
+            Some(Reported::Confirmations(n)) => Observation::Confirmations(*n),
+            Some(Reported::Failed(reason)) => Observation::Failed(reason.clone()),
             None => match magic(&finality.reference) {
-                Some(Magic::Ok) => Ok(self.finality),
-                Some(Magic::Fail) => Err("declined by the rail".to_owned()),
+                Some(Magic::Ok) => Observation::Confirmations(self.finality),
+                Some(Magic::Fail) => Observation::Failed("declined by the rail".to_owned()),
                 Some(Magic::Reorg) => {
                     let checks = sandbox::count_check(&self.pool, &self.id, &finality.reference)
                         .map_err(RailError::Unavailable)?;
                     if checks >= self.finality {
-                        Err(format!(
+                        Observation::Failed(format!(
                             "reorganized: dropped after {} confirmations",
                             checks.saturating_sub(1)
                         ))
                     } else {
-                        Ok(checks)
+                        Observation::Confirmations(checks)
                     }
                 }
                 None => {
@@ -135,8 +142,8 @@ impl Rail for SandboxRail {
             )));
         }
         let confirmations = match self.observe(finality)? {
-            Ok(confirmations) => confirmations,
-            Err(reason) => return Ok(FinalityStatus::Failed { reason }),
+            Observation::Confirmations(confirmations) => confirmations,
+            Observation::Failed(reason) => return Ok(FinalityStatus::Failed { reason }),
         };
         if confirmations >= self.finality {
             Ok(FinalityStatus::Final {
