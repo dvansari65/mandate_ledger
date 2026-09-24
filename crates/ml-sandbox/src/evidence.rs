@@ -3,7 +3,7 @@
 //! exported it.
 
 use crate::Failure;
-use crate::engine::{self, DbArgs, TrustArgs};
+use crate::engine::{self, DbArgs, RailArgs, TrustArgs};
 use crate::report::Report;
 use crate::{files, keys};
 use clap::Args;
@@ -32,7 +32,7 @@ pub struct Cmd {
 pub fn run(cmd: &Cmd) -> Result<Report, Failure> {
     let ctx = engine::context(&cmd.ctx)?;
     let host = cmd.sign.as_deref().map(keys::load).transpose()?;
-    let ledger = engine::ledger(&cmd.db, &TrustArgs::default())?;
+    let ledger = engine::ledger(&cmd.db, &TrustArgs::default(), &RailArgs::default())?;
     // Exporting is not a payment step, so an unknown context is an error,
     // not a refusal: there is no decision here to record.
     let bundle = ledger

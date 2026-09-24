@@ -47,9 +47,15 @@ pub fn unique() -> String {
 }
 
 /// A mandate body for `principal`, allowing grocery at bigbasket.com up to
-/// 2,000 per purchase and 8,000 in total, merchant-signed carts only. Valid
-/// from 2023 until 2100: the engine commands run on the wall clock.
+/// 2,000 per purchase and 8,000 in total, five a day, merchant-signed carts
+/// only. Valid from 2023 until 2100: the engine commands run on the wall
+/// clock unless a test freezes it.
 pub fn body(id: &str, principal: &str) -> String {
+    body_valid(id, principal, 1_700_000_000, 4_102_444_800)
+}
+
+/// The same mandate with a chosen validity window, in Unix seconds.
+pub fn body_valid(id: &str, principal: &str, from: i64, until: i64) -> String {
     format!(
         r#"{{
   "id": "{id}",
@@ -61,12 +67,12 @@ pub fn body(id: &str, principal: &str) -> String {
     "currency": "INR",
     "max_per_txn": {{ "amount": "2000.00", "currency": "INR" }},
     "max_total": {{ "amount": "8000.00", "currency": "INR" }},
-    "valid_from": 1700000000,
-    "valid_until": 4102444800,
+    "valid_from": {from},
+    "valid_until": {until},
     "velocity": {{ "max_count": 5, "window_secs": 86400 }},
     "min_attestation": "merchant_signed"
   }},
-  "issued_at": 1700000000
+  "issued_at": {from}
 }}"#
     )
 }
@@ -105,9 +111,14 @@ pub fn new_key(dir: &Path, name: &str) -> PathBuf {
 }
 
 pub fn sign_mandate(dir: &Path, body_text: &str, key: &Path) -> PathBuf {
-    let body_file = dir.join("body.json");
+    sign_mandate_as(dir, "mandate.json", body_text, key)
+}
+
+/// Sign a mandate body into `dir/name`.
+pub fn sign_mandate_as(dir: &Path, name: &str, body_text: &str, key: &Path) -> PathBuf {
+    let body_file = dir.join(format!("{name}.body.json"));
     std::fs::write(&body_file, body_text).unwrap();
-    let out = dir.join("mandate.json");
+    let out = dir.join(name);
     let (code, _, err) = run(ml()
         .args(["mandate", "sign"])
         .arg(&body_file)

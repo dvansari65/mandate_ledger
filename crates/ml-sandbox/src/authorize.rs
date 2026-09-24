@@ -4,7 +4,7 @@
 //! prints is the handle every later step takes; on refusal the report says
 //! which check failed, and the refusal is in the log.
 
-use crate::engine::{self, DbArgs, TrustArgs};
+use crate::engine::{self, DbArgs, RailArgs, TrustArgs};
 use crate::report::Report;
 use crate::{Failure, files};
 use clap::Args;
@@ -32,6 +32,9 @@ pub struct Cmd {
 
     #[command(flatten)]
     trust: TrustArgs,
+
+    #[command(flatten)]
+    rail: RailArgs,
 }
 
 pub fn run(cmd: &Cmd) -> Result<Report, Failure> {
@@ -43,7 +46,7 @@ pub fn run(cmd: &Cmd) -> Result<Report, Failure> {
         .normalize_cart(&raw)
         .map_err(|e| Failure::undecided(format!("{}: {e}", cmd.cart.display())))?;
 
-    let ledger = engine::ledger(&cmd.db, &cmd.trust)?;
+    let ledger = engine::ledger(&cmd.db, &cmd.trust, &cmd.rail)?;
     match ledger.authorize(&mandate, &cart, &cmd.request_key) {
         Ok(auth) => Ok(Report::new()
             .with("context", auth.ctx().as_str())

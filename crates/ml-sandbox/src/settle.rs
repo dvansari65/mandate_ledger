@@ -1,28 +1,29 @@
 //! `ml settle`: ask the rail whether a recorded payment is final.
 //!
-//! The mock rail reports what it is told: a number of confirmations, final
-//! at one, or a failure. Pending changes nothing and can be asked again;
-//! failure releases the reservation and leads to `ml compensate`.
+//! Told with `--confirmations` or `--failed`, the sandbox rail reports that.
+//! Asked with neither, it answers from the payment reference: `…-ok` is
+//! final, `…-fail` failed, `…-reorg` gains a confirmation per check and is
+//! then dropped. Pending changes nothing and can be asked again; failure
+//! releases the reservation and leads to `ml compensate`.
 
 use crate::Failure;
-use crate::engine::{self, DbArgs, TrustArgs};
+use crate::engine::{self, DbArgs, RailArgs, TrustArgs};
+use crate::rail::{Finality, Reported};
 use crate::report::Report;
-use clap::{ArgGroup, Args};
-use ml_adapters::MockFinality;
+use clap::Args;
 use ml_core::{DenyReason, Settlement, Stage};
 
 #[derive(Args)]
-#[command(group = ArgGroup::new("evidence").required(true).args(["confirmations", "failed"]))]
 pub struct Cmd {
     /// The context, from `ml authorize`.
     #[arg(value_name = "CTX")]
     ctx: String,
 
-    /// What the rail reports: this many confirmations. Final at one.
-    #[arg(long, value_name = "N")]
+    /// Speak for the rail: it reports this many confirmations.
+    #[arg(long, value_name = "N", conflicts_with = "failed")]
     confirmations: Option<u32>,
 
-    /// What the rail reports: the payment failed, for this reason.
+    /// Speak for the rail: it reports the payment failed, for this reason.
     #[arg(long, value_name = "REASON")]
     failed: Option<String>,
 
@@ -36,11 +37,14 @@ pub struct Cmd {
 
     #[command(flatten)]
     trust: TrustArgs,
+
+    #[command(flatten)]
+    rail: RailArgs,
 }
 
 pub fn run(cmd: &Cmd) -> Result<Report, Failure> {
     let ctx = engine::context(&cmd.ctx)?;
-    let ledger = engine::ledger(&cmd.db, &cmd.trust)?;
+    let ledger = engine::ledger(&cmd.db, &cmd.trust, &cmd.rail)?;
     let Some(reached) = engine::reached(&ledger, &ctx)? else {
         return Ok(engine::unreachable(
             &ctx,
@@ -65,14 +69,13 @@ pub fn run(cmd: &Cmd) -> Result<Report, Failure> {
         .reference
         .clone()
         .unwrap_or_else(|| paid.reference().to_owned());
-    let finality = match (cmd.confirmations, &cmd.failed) {
-        (Some(n), None) => MockFinality::confirmed(reference, n),
-        (None, Some(reason)) => MockFinality::failed(reference, reason.as_str()),
-        _ => {
-            return Err(Failure::undecided(
-                "give --confirmations or --failed, not both",
-            ));
-        }
+    let finality = Finality {
+        reference,
+        reported: match (cmd.confirmations, &cmd.failed) {
+            (Some(n), _) => Some(Reported::Confirmations(n)),
+            (None, Some(reason)) => Some(Reported::Failed(reason.clone())),
+            (None, None) => None,
+        },
     };
     let report = Report::new().with("context", ctx.as_str());
     match ledger.record_settlement(&paid, &finality) {

@@ -76,24 +76,7 @@ impl Setup {
         request_key: &str,
         extra: &[String],
     ) -> (i32, serde_json::Value, String) {
-        let (code, out, err) = run(ml()
-            .args([
-                "--json",
-                "authorize",
-                "--request-key",
-                request_key,
-                "--mandate",
-            ])
-            .arg(&self.mandate)
-            .arg("--cart")
-            .arg(cart)
-            .args(extra));
-        let report = if out.is_empty() {
-            serde_json::Value::Null
-        } else {
-            json(&out)
-        };
-        (code, report, err)
+        authorize_under(&self.mandate, cart, request_key, extra)
     }
 
     /// Run `ml --json <args> --database-url URL` and parse the report.
@@ -148,6 +131,33 @@ impl Setup {
         assert_eq!(code, 0, "{err}");
         json(&out)["events"].as_array().unwrap().clone()
     }
+}
+
+/// Authorize under a specific mandate file.
+fn authorize_under(
+    mandate: &Path,
+    cart: &Path,
+    request_key: &str,
+    extra: &[String],
+) -> (i32, serde_json::Value, String) {
+    let (code, out, err) = run(ml()
+        .args([
+            "--json",
+            "authorize",
+            "--request-key",
+            request_key,
+            "--mandate",
+        ])
+        .arg(mandate)
+        .arg("--cart")
+        .arg(cart)
+        .args(extra));
+    let report = if out.is_empty() {
+        serde_json::Value::Null
+    } else {
+        json(&out)
+    };
+    (code, report, err)
 }
 
 #[test]
@@ -626,4 +636,160 @@ fn evidence_exported_from_the_ledger_verifies_without_it() {
     ]);
     assert_eq!(code, 1, "{err}");
     assert!(err.contains("no such context"), "{err}");
+}
+
+#[test]
+fn the_rail_answers_from_the_reference() {
+    let Some(url) = database() else { return };
+    let s = Setup::new("rail-magic", url);
+
+    // `-ok`: final on the first ask, without being told anything.
+    let ctx = s.authorized(&s.cart("ok", "10.00"), "ok");
+    let ok = format!("{}-ok", s.reference("pay"));
+    let (code, _, err) = s.step(&["pay", &ctx, "--reference", &ok, "--amount", "10.00 INR"]);
+    assert_eq!(code, 0, "{err}");
+    let (code, r, err) = s.step(&["settle", &ctx]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(r["state"], "settled");
+    assert_eq!(r["reference"], format!("{ok}@1"));
+
+    // `-fail`: the rail declined it.
+    let ctx = s.authorized(&s.cart("fail", "10.00"), "fail");
+    let fail = format!("{}-fail", s.reference("pay"));
+    let (code, _, err) = s.step(&["pay", &ctx, "--reference", &fail, "--amount", "10.00 INR"]);
+    assert_eq!(code, 0, "{err}");
+    let (code, r, _) = s.step(&["settle", &ctx]);
+    assert_eq!(code, 0);
+    assert_eq!(r["state"], "settlement_failed");
+    assert_eq!(r["reason"], "declined by the rail");
+
+    // `-reorg` at finality 3: a confirmation per check, dropped on the third
+    // — and the count survives across processes.
+    let ctx = s.authorized(&s.cart("reorg", "10.00"), "reorg");
+    let reorg = format!("{}-reorg", s.reference("pay"));
+    let (code, _, err) = s.step(&["pay", &ctx, "--reference", &reorg, "--amount", "10.00 INR"]);
+    assert_eq!(code, 0, "{err}");
+    for have in 1..3 {
+        let (code, r, _) = s.step(&["settle", &ctx, "--finality", "3"]);
+        assert_eq!(code, 0);
+        assert_eq!(r["state"], "pending");
+        assert!(
+            r["reason"]
+                .as_str()
+                .unwrap()
+                .ends_with(&format!("have {have}")),
+            "{r}"
+        );
+    }
+    let (code, r, _) = s.step(&["settle", &ctx, "--finality", "3"]);
+    assert_eq!(code, 0);
+    assert_eq!(r["state"], "settlement_failed");
+    assert_eq!(r["reason"], "reorganized: dropped after 2 confirmations");
+    let (code, r, _) = s.step(&["compensate", &ctx]);
+    assert_eq!((code, r["state"].as_str()), (0, Some("compensated")));
+
+    // A plain reference has to be told: the rail has no report of its own.
+    let ctx = s.authorized(&s.cart("plain", "10.00"), "plain");
+    let plain = s.reference("pay");
+    let (code, _, err) = s.step(&["pay", &ctx, "--reference", &plain, "--amount", "10.00 INR"]);
+    assert_eq!(code, 0, "{err}");
+    let (code, _, err) = s.step(&["settle", &ctx]);
+    assert_eq!(code, 1, "{err}");
+    assert!(err.contains("no report"), "{err}");
+    let (code, r, _) = s.step(&["settle", &ctx, "--confirmations", "1"]);
+    assert_eq!((code, r["state"].as_str()), (0, Some("settled")));
+}
+
+#[test]
+fn finality_from_another_rail_is_refused() {
+    let Some(url) = database() else { return };
+    let s = Setup::new("rail-mismatch", url);
+    let ctx = s.authorized(&s.cart("cart", "10.00"), "o1");
+    let pay = s.reference("pay");
+    let (code, _, err) = s.step(&["pay", &ctx, "--reference", &pay, "--amount", "10.00 INR"]);
+    assert_eq!(code, 0, "{err}");
+
+    let (code, r, _) = s.step(&["settle", &ctx, "--confirmations", "1", "--rail", "other"]);
+    assert_eq!(code, 2);
+    assert_eq!(r["refused"], "RAIL_MISMATCH");
+    assert_eq!(r["recorded"], true);
+
+    // From the rail that took the payment, it settles.
+    let (code, r, _) = s.step(&["settle", &ctx, "--confirmations", "1"]);
+    assert_eq!((code, r["state"].as_str()), (0, Some("settled")));
+}
+
+/// Puts the sandbox clock back to wall time when dropped, even if the test
+/// panicked: the clock is global to the database, and a frozen one would
+/// change "now" for every other test running against it.
+struct WallClock<'a>(&'a Setup);
+
+impl Drop for WallClock<'_> {
+    fn drop(&mut self) {
+        let _ = run(ml().args(["clock", "reset", "--database-url", &self.0.url]));
+    }
+}
+
+#[test]
+fn the_clock_can_be_frozen_advanced_and_reset() {
+    let Some(url) = database() else { return };
+    let s = Setup::new("clock", url);
+    let _wall = WallClock(&s);
+
+    let (code, r, err) = s.step(&["clock", "show"]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(r["source"], "wall");
+
+    // Frozen, the engine reads that instant, and the events say so.
+    let at: i64 = 1_800_000_000; // inside every fixture mandate's window
+    let (code, r, _) = s.step(&["clock", "set", &at.to_string()]);
+    assert_eq!(code, 0);
+    assert_eq!(r["source"], "frozen");
+    assert_eq!(r["now"], at);
+    let ctx = s.authorized(&s.cart("c0", "10.00"), "o0");
+    assert_eq!(s.chain(&ctx)[0]["at"], at);
+
+    // Expiry: a mandate that ends a minute after `at`.
+    let short = sign_mandate_as(
+        &s.dir,
+        "short-mandate.json",
+        &body_valid(
+            &format!("{}-short", s.mandate_id),
+            &s.principal,
+            at,
+            at + 60,
+        ),
+        &s.user_key,
+    );
+    let (code, _, err) = authorize_under(&short, &s.cart("short", "10.00"), "s1", &s.trust_args());
+    assert_eq!(code, 0, "{err}");
+    let (code, _, _) = s.step(&["clock", "set", &(at + 120).to_string()]);
+    assert_eq!(code, 0);
+    let (code, r, _) = authorize_under(&short, &s.cart("short", "10.00"), "s2", &s.trust_args());
+    assert_eq!(
+        (code, r["refused"].as_str()),
+        (2, Some("MANDATE_EXPIRED")),
+        "{r}"
+    );
+
+    // Velocity: five a day. Back at `at`, four more fill the window; the
+    // sixth is refused — until a day passes.
+    let (code, _, _) = s.step(&["clock", "set", &at.to_string()]);
+    assert_eq!(code, 0);
+    for i in 1..=4 {
+        s.authorized(&s.cart(&format!("c{i}"), "10.00"), &format!("o{i}"));
+    }
+    let (code, r, _) = s.authorize(&s.cart("c5", "10.00"), "o5", &s.trust_args());
+    assert_eq!(
+        (code, r["refused"].as_str()),
+        (2, Some("VELOCITY_EXCEEDED"))
+    );
+    let (code, r, _) = s.step(&["clock", "advance", "86401"]);
+    assert_eq!(code, 0);
+    assert_eq!(r["now"], at + 86401);
+    s.authorized(&s.cart("c6", "10.00"), "o6");
+
+    let (code, r, _) = s.step(&["clock", "reset"]);
+    assert_eq!(code, 0);
+    assert_eq!(r["source"], "wall");
 }
