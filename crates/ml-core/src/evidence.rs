@@ -41,7 +41,15 @@ impl EvidenceBundle {
     }
 
     /// Recompute the hash chain and confirm it is intact.
+    ///
+    /// A bundle in a format this build does not know is refused rather than
+    /// checked with the wrong rules.
     pub fn verify(&self) -> Result<(), EvidenceError> {
+        if self.version != EVIDENCE_VERSION {
+            return Err(EvidenceError::UnsupportedVersion {
+                version: self.version,
+            });
+        }
         if self.events.is_empty() {
             return Err(EvidenceError::Empty);
         }
@@ -139,6 +147,12 @@ impl SignedEvidence {
 /// check failed, when there is one.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum EvidenceError {
+    /// The bundle declares a format version this build does not understand.
+    #[error("unsupported bundle version {version}")]
+    UnsupportedVersion {
+        /// The version the bundle declares.
+        version: u16,
+    },
     /// No events.
     #[error("bundle is empty")]
     Empty,
@@ -179,6 +193,7 @@ impl EvidenceError {
     #[must_use]
     pub const fn code(&self) -> &'static str {
         match self {
+            Self::UnsupportedVersion { .. } => "UNSUPPORTED_VERSION",
             Self::Empty => "EMPTY",
             Self::WrongContext { .. } => "WRONG_CONTEXT",
             Self::BrokenChain { .. } => "BROKEN_CHAIN",
@@ -197,7 +212,10 @@ impl EvidenceError {
             | Self::BrokenChain { seq }
             | Self::HashMismatch { seq }
             | Self::SequenceNotIncreasing { seq } => Some(*seq),
-            Self::Empty | Self::SignatureInvalid | Self::Canonicalize(_) => None,
+            Self::UnsupportedVersion { .. }
+            | Self::Empty
+            | Self::SignatureInvalid
+            | Self::Canonicalize(_) => None,
         }
     }
 }

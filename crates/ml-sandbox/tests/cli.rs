@@ -338,11 +338,23 @@ fn verify_checks_a_bundle_with_no_database_and_names_the_broken_event() {
     assert_eq!(r["refused"], "BROKEN_CHAIN");
     assert_eq!(r["event"], 3);
 
-    // Not a bundle at all is an error, not a verdict.
+    // A format this build does not know is refused, not checked.
+    let mut future: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    future["version"] = 2.into();
+    let unknown = dir.join("future.json");
+    std::fs::write(&unknown, future.to_string()).unwrap();
+    let (code, r, _) = verify(&unknown, &[]);
+    assert_eq!(code, 2);
+    assert_eq!(r["refused"], "UNSUPPORTED_VERSION");
+
+    // Not a bundle at all is an error, not a verdict — and the error says
+    // what is missing.
     let junk = dir.join("junk.json");
     std::fs::write(&junk, "{\"hello\": 1}").unwrap();
     let (code, _, err) = verify(&junk, &[]);
     assert_eq!(code, 1, "{err}");
+    assert!(err.contains("missing field"), "{err}");
 }
 
 #[test]
@@ -368,6 +380,14 @@ fn verify_checks_who_signed_a_bundle() {
     assert_eq!(code, 0, "{err}");
     assert_eq!(r["signed"], true);
     assert_eq!(r["signer"], hex::encode(signed.signer));
+
+    // Requiring a signer of a bundle that has none is a refusal, not a pass.
+    let bare = dir.join("bare.json");
+    std::fs::write(&bare, serde_json::to_string(&signed.bundle).unwrap()).unwrap();
+    let (code, r, _) = verify(&bare, &["--signer", &format!("{}.pub", host.display())]);
+    assert_eq!(code, 2);
+    assert_eq!(r["refused"], "SIGNATURE_INVALID");
+    assert!(r["detail"].as_str().unwrap().contains("not signed"));
 
     // The exporter you expect, from its public key alone.
     let host_pub = format!("{}.pub", host.display());

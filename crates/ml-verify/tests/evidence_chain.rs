@@ -89,3 +89,12 @@ fn signed_bundle_binds_exporter() {
     assert_eq!(err, EvidenceError::SignatureInvalid);
     assert_eq!((err.code(), err.seq()), ("SIGNATURE_INVALID", None));
 }
+
+#[test]
+fn an_unknown_format_version_is_refused_not_checked() {
+    let (_h, mut b) = delivered_bundle();
+    b.version = 2;
+    let err = b.verify().unwrap_err();
+    assert_eq!(err, EvidenceError::UnsupportedVersion { version: 2 });
+    assert_eq!((err.code(), err.seq()), ("UNSUPPORTED_VERSION", None));
+}

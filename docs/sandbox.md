@@ -235,8 +235,17 @@ flags, and it runs on a machine that has never seen the ledger. That is the
 claim "anyone can verify it without your database", made runnable.
 
 A bundle that does not verify is exit `2`, with the code and the event it
-failed at: `HASH_MISMATCH` (an event no longer matches its hash),
-`BROKEN_CHAIN` (an event was removed or reordered), `SEQUENCE_NOT_INCREASING`,
-`WRONG_CONTEXT`, `EMPTY`, or `SIGNATURE_INVALID` — which also covers a bundle
-signed by someone other than `--signer`. A file that is not a bundle at all
-is an error, exit `1`.
+failed at — `event` is the sequence number, as it appears in the file:
+`HASH_MISMATCH` (an event no longer matches its hash), `BROKEN_CHAIN` (an
+event was removed or reordered), `SEQUENCE_NOT_INCREASING`, `WRONG_CONTEXT`,
+`EMPTY`, `UNSUPPORTED_VERSION` (a format this build does not know is refused,
+not checked with the wrong rules), or `SIGNATURE_INVALID` — which also covers
+a bundle signed by someone other than `--signer`, and a bundle with no
+signature when `--signer` is given. A file that is not a bundle at all is an
+error, exit `1`.
+
+The chain check catches an edit to any event. It cannot catch an edit that
+recomputes every hash afterwards — hashes have no secret in them, so anyone
+can rebuild a consistent chain. That is what the signature is for: a
+re-hashed bundle is intact by the chain's rules and fails the host's
+signature. Sign what you hand to a third party.

@@ -9,8 +9,8 @@ use crate::report::Report;
 use crate::{files, keys};
 use clap::Args;
 use ml_core::{EvidenceBundle, EvidenceError, SignedEvidence};
-use serde::Deserialize;
-use std::path::PathBuf;
+use serde_json::Value;
+use std::path::{Path, PathBuf};
 
 #[derive(Args)]
 pub struct Cmd {
@@ -26,16 +26,28 @@ pub struct Cmd {
 /// Either shape `ml evidence` writes: a signed file has the bundle nested
 /// under `bundle`, next to the exporter's key and signature; a bare file is
 /// the bundle itself.
-#[derive(Deserialize)]
-#[serde(untagged)]
 enum Evidence {
     Signed(SignedEvidence),
     Bare(EvidenceBundle),
 }
 
+/// Told apart by structure, so a malformed file gets the precise error —
+/// "missing field `events`" — rather than "matched no variant".
+fn read(path: &Path) -> Result<Evidence, Failure> {
+    let value: Value = files::read_json(path)?;
+    let parsed = if value.get("bundle").is_some() {
+        serde_json::from_value(value).map(Evidence::Signed)
+    } else {
+        serde_json::from_value(value).map(Evidence::Bare)
+    };
+    parsed.map_err(|e| {
+        Failure::undecided(format!("{} is not an evidence bundle: {e}", path.display()))
+    })
+}
+
 pub fn run(cmd: &Cmd) -> Result<Report, Failure> {
     let expected = cmd.signer.as_deref().map(keys::public).transpose()?;
-    let evidence: Evidence = files::read_json(&cmd.file)?;
+    let evidence = read(&cmd.file)?;
     let (bundle, signer) = match &evidence {
         Evidence::Signed(attested) => (&attested.bundle, Some(attested.signer)),
         Evidence::Bare(bundle) => (bundle, None),
