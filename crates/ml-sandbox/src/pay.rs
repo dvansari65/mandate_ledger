@@ -7,7 +7,7 @@
 //! them is refused by the engine, not by this command.
 
 use crate::Failure;
-use crate::engine::{self, DbArgs, TrustArgs};
+use crate::engine::{self, DbArgs, RailArgs, TrustArgs};
 use crate::report::Report;
 use clap::Args;
 use ml_adapters::MockProof;
@@ -55,11 +55,14 @@ pub struct Cmd {
 
     #[command(flatten)]
     trust: TrustArgs,
+
+    #[command(flatten)]
+    rail: RailArgs,
 }
 
 pub fn run(cmd: &Cmd) -> Result<Report, Failure> {
     let ctx = engine::context(&cmd.ctx)?;
-    let ledger = engine::ledger(&cmd.db, &cmd.trust)?;
+    let ledger = engine::ledger(&cmd.db, &cmd.trust, &cmd.rail)?;
     let Some(reached) = engine::reached(&ledger, &ctx)? else {
         return Ok(engine::unreachable(
             &ctx,

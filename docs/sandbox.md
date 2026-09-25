@@ -249,3 +249,56 @@ recomputes every hash afterwards — hashes have no secret in them, so anyone
 can rebuild a consistent chain. That is what the signature is for: a
 re-hashed bundle is intact by the chain's rules and fails the host's
 signature. Sign what you hand to a third party.
+
+## The rail
+
+The sandbox's rail is one the operator drives. `ml pay` records a payment on
+it; `ml settle` asks it for finality. Told with `--confirmations N` or
+`--failed REASON`, it reports that. Asked with neither, it answers from the
+payment reference itself:
+
+| Reference ends in | The rail reports |
+|---|---|
+| `-ok` | final |
+| `-fail` | failed: declined by the rail |
+| `-reorg` | a confirmation per check, then dropped in a reorganization on the check that would have made it final |
+
+```bash
+ml pay ctx_… --reference pay-7-reorg --amount "128.00 INR"
+ml settle ctx_… --finality 3     # pending, have 1
+ml settle ctx_… --finality 3     # pending, have 2
+ml settle ctx_… --finality 3     # settlement_failed: reorganized
+```
+
+Any other reference has to be told, or the rail says it has no report — exit
+`1`: the rail was unavailable, which is not a decision. `--finality N` is
+how many confirmations the rail needs before it calls a payment final
+(default 1); `--rail NAME` is the rail's id (default `mock`), recorded with
+every payment. Finality evidence must come from the rail that took the
+payment: `ml settle … --rail other` is refused `RAIL_MISMATCH`. Nonces are
+spent per rail, so a reference used on one rail is free on another.
+
+A reorganization *after* the rail called a payment final cannot reach the
+ledger: once settled, a context stays settled, and the chain records which
+rail declared finality and when. A rail whose "final" can be reversed is a
+broken rail, and the evidence says whose word was taken.
+
+## The clock
+
+```bash
+ml clock show             # now, and whether it is wall time or frozen
+ml clock set 1800000000   # freeze the sandbox at an instant, in Unix seconds
+ml clock advance 86401    # a day and a second later
+ml clock reset            # back to wall time
+```
+
+Frozen, the clock is what every engine command against this database reads
+as "now": a mandate expires, a velocity window passes, and every event
+carries that instant. It is global to the database — freezing it changes
+time for every process using it, a test suite running alongside included —
+so reset it when you are done.
+
+The clock and the rail's memory of its checks live in the ledger's database,
+in tables prefixed `ml_sandbox_`. They are the sandbox's, not the ledger's:
+created the first time a feature needs them, never touched by the ledger's
+migrations, and never created by a command that only reads.

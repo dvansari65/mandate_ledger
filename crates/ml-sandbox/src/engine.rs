@@ -6,13 +6,14 @@
 //! and it is the point: nothing survives between two commands except what
 //! the database holds.
 
+use crate::rail::SandboxRail;
 use crate::report::Report;
-use crate::{Failure, keys};
+use crate::{Failure, keys, sandbox};
 use clap::Args;
-use ml_adapters::{MockRail, NativeCartAdapter};
+use ml_adapters::NativeCartAdapter;
 use ml_core::{
-    ContextId, Denied, DenyReason, Ledger, LedgerError, Money, PaymentState, PrincipalId, Reached,
-    Stage, SystemClock, TrustedSigners,
+    Clock, ContextId, Denied, DenyReason, Ledger, LedgerError, Money, PaymentState, PrincipalId,
+    Reached, Stage, SystemClock, Timestamp, TrustedSigners,
 };
 use ml_store_postgres::PostgresStore;
 use postgres::{Config, NoTls};
@@ -26,9 +27,47 @@ use std::time::Duration;
 /// thirty-second wait.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// The engine as the sandbox assembles it: PostgreSQL, the mock rail, wall
-/// time, and whichever signers the operator named.
-pub type Engine = Ledger<PostgresStore, MockRail, TrustedSigners, SystemClock>;
+/// The engine as the sandbox assembles it: PostgreSQL, the rail the
+/// operator drives, the sandbox's clock, and whichever signers the operator
+/// named.
+pub type Engine = Ledger<PostgresStore, SandboxRail, TrustedSigners, SandboxClock>;
+
+/// Wall time, unless `ml clock` has frozen the sandbox at an instant.
+pub enum SandboxClock {
+    Wall,
+    Frozen(Timestamp),
+}
+
+impl Clock for SandboxClock {
+    fn now(&self) -> Timestamp {
+        match self {
+            Self::Wall => SystemClock.now(),
+            Self::Frozen(at) => *at,
+        }
+    }
+}
+
+/// Which rail a payment is on, and when that rail calls a payment final.
+#[derive(Args)]
+pub struct RailArgs {
+    /// The rail's id, recorded with every payment. Finality evidence has to
+    /// come from the same rail.
+    #[arg(long, default_value = "mock", value_name = "NAME")]
+    rail: String,
+
+    /// Confirmations the rail needs before it calls a payment final.
+    #[arg(long, default_value_t = 1, value_name = "N")]
+    finality: u32,
+}
+
+impl Default for RailArgs {
+    fn default() -> Self {
+        Self {
+            rail: "mock".to_owned(),
+            finality: 1,
+        }
+    }
+}
 
 /// Where the ledger lives.
 #[derive(Args)]
@@ -142,15 +181,19 @@ pub fn adapter(trust: &TrustArgs) -> Result<NativeCartAdapter, Failure> {
 }
 
 /// The whole engine, for a command that decides something. Local
-/// configuration is checked before the database is touched.
-pub fn ledger(db: &DbArgs, trust: &TrustArgs) -> Result<Engine, Failure> {
+/// configuration is checked before the database is touched; the sandbox's
+/// clock is read once, here, so a command sees one consistent "now".
+pub fn ledger(db: &DbArgs, trust: &TrustArgs, rail: &RailArgs) -> Result<Engine, Failure> {
     let signers = signers(trust)?;
-    Ok(Ledger::new(
-        store(db)?,
-        MockRail::new("mock", 1),
-        signers,
-        SystemClock,
-    ))
+    let store = store(db)?;
+    let clock = match sandbox::clock(store.pool()).map_err(Failure::undecided)? {
+        Some(at) => SandboxClock::Frozen(at),
+        None => SandboxClock::Wall,
+    };
+    // The rail shares the command's one connection: the engine consults it
+    // between store calls, never during one.
+    let rail = SandboxRail::new(rail.rail.clone(), rail.finality, store.pool().clone());
+    Ok(Ledger::new(store, rail, signers, clock))
 }
 
 /// What an engine error means to the shell. A refusal is a report — the

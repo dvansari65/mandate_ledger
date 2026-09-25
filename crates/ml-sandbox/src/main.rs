@@ -19,6 +19,7 @@
 
 mod authorize;
 mod cart;
+mod clock;
 mod compensate;
 mod contexts;
 mod deliver;
@@ -30,8 +31,10 @@ mod keys;
 mod log;
 mod mandate;
 mod pay;
+mod rail;
 mod report;
 mod revoke;
+mod sandbox;
 mod settle;
 mod verify;
 
@@ -89,6 +92,11 @@ enum Command {
     Evidence(evidence::Cmd),
     /// Verify an evidence bundle from a file. Needs no database.
     Verify(verify::Cmd),
+    /// The sandbox's clock: show it, freeze it, advance it, reset it.
+    Clock {
+        #[command(subcommand)]
+        command: clock::Command,
+    },
 }
 
 /// What the shell sees. Scripts branch on these, so they are part of the
@@ -161,6 +169,7 @@ fn main() -> ExitCode {
         Command::Contexts(cmd) => contexts::run(&cmd),
         Command::Evidence(cmd) => evidence::run(&cmd),
         Command::Verify(cmd) => verify::run(&cmd),
+        Command::Clock { command } => clock::run(&command),
     };
 
     match result {
