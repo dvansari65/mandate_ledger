@@ -219,6 +219,7 @@ crates/ml-adapters         NativeCartAdapter, MockRail
 crates/ml-store-postgres   durable PostgreSQL store
 crates/ml-verify           lifecycle, denial, concurrency, tamper and property tests
 crates/ml-sandbox          the ml command: drive the engine from a terminal
+scenarios/                 the threat model, run: eight scripts driving ml
 examples/quickstart        runnable end to end, no database required
 site/                      landing page (Next.js, TypeScript)
 docs/threat-model.md       what is prevented, bounded, and out of scope
@@ -245,7 +246,12 @@ ML_TEST_DATABASE_URL=postgres://localhost/mandate_ledger_test cargo test -p ml-s
 CI additionally checks the crate on the minimum supported Rust version,
 builds the documentation with warnings denied, audits dependencies for
 advisories and licences with `cargo-deny` and `cargo-audit`, and runs the
-PostgreSQL suites against a service container.
+PostgreSQL suites and the eight threat-model scenarios in
+[`scenarios/`](scenarios/README.md) against a service container:
+
+```bash
+ML_DATABASE_URL=postgres://localhost/mandate_ledger_test scenarios/run-all.sh
+```
 
 Every invariant in the core should trace back to a row in
 [`docs/threat-model.md`](docs/threat-model.md). Changes that add an invariant

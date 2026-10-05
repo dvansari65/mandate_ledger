@@ -96,6 +96,36 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo test -p ml-store-postgres -p ml-sandbox
 
+  scenarios:
+    # The eight threat-model scenarios, driving the `ml` binary one process
+    # per step against a database of their own. `scenarios/README.md` maps
+    # each script to its row.
+    name: scenarios (postgres)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      ML_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: shellcheck -x -P SCRIPTDIR scenarios/*.sh
+      - run: cargo build -p ml-sandbox
+      - run: scenarios/run-all.sh
+
   docs:
     name: rustdoc
     runs-on: ubuntu-latest
