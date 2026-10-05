@@ -302,3 +302,17 @@ The clock and the rail's memory of its checks live in the ledger's database,
 in tables prefixed `ml_sandbox_`. They are the sandbox's, not the ledger's:
 created the first time a feature needs them, never touched by the ledger's
 migrations, and never created by a command that only reads.
+
+## Scenarios
+
+```bash
+ML_DATABASE_URL=postgres://localhost/mandate_ledger scenarios/run-all.sh
+```
+
+[`scenarios/`](../scenarios/README.md) is the threat model, run: eight
+scripts, one per row, each driving the commands above the way an attacker
+and then an honest party would — one process per step — and asserting the
+exit code, the refusal code in the report and in the chain, and that the
+evidence verifies without the database. CI runs them against a PostgreSQL
+service on every push. When a convention on this page is unclear, the
+script that relies on it is the precise statement.
