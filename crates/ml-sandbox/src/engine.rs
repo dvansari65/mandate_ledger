@@ -55,8 +55,9 @@ pub struct RailArgs {
     #[arg(long, default_value = "mock", value_name = "NAME")]
     rail: String,
 
-    /// Confirmations the rail needs before it calls a payment final.
-    #[arg(long, default_value_t = 1, value_name = "N")]
+    /// Confirmations the rail needs before it calls a payment final. At
+    /// least one: "final at zero confirmations" is not a threshold.
+    #[arg(long, default_value_t = 1, value_name = "N", value_parser = clap::value_parser!(u32).range(1..))]
     finality: u32,
 }
 

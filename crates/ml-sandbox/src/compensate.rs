@@ -22,14 +22,11 @@ pub struct Cmd {
 
     #[command(flatten)]
     trust: TrustArgs,
-
-    #[command(flatten)]
-    rail: RailArgs,
 }
 
 pub fn run(cmd: &Cmd) -> Result<Report, Failure> {
     let ctx = engine::context(&cmd.ctx)?;
-    let ledger = engine::ledger(&cmd.db, &cmd.trust, &cmd.rail)?;
+    let ledger = engine::ledger(&cmd.db, &cmd.trust, &RailArgs::default())?;
     let Some(reached) = engine::reached(&ledger, &ctx)? else {
         return Ok(engine::unreachable(
             &ctx,

@@ -32,9 +32,6 @@ pub struct Cmd {
 
     #[command(flatten)]
     trust: TrustArgs,
-
-    #[command(flatten)]
-    rail: RailArgs,
 }
 
 pub fn run(cmd: &Cmd) -> Result<Report, Failure> {
@@ -46,7 +43,7 @@ pub fn run(cmd: &Cmd) -> Result<Report, Failure> {
         .normalize_cart(&raw)
         .map_err(|e| Failure::undecided(format!("{}: {e}", cmd.cart.display())))?;
 
-    let ledger = engine::ledger(&cmd.db, &cmd.trust, &cmd.rail)?;
+    let ledger = engine::ledger(&cmd.db, &cmd.trust, &RailArgs::default())?;
     match ledger.authorize(&mandate, &cart, &cmd.request_key) {
         Ok(auth) => Ok(Report::new()
             .with("context", auth.ctx().as_str())
