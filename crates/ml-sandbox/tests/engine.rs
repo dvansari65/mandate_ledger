@@ -304,7 +304,7 @@ fn a_cart_with_an_unknown_merchant_key_never_reaches_the_ledger() {
     let (code, _, err) = s.authorize(&cart, "order-1", &args);
     assert_eq!(code, 1, "{err}");
     assert!(err.contains("unknown merchant key"), "{err}");
-    assert!(s.contexts().is_empty());
+    assert_eq!(s.contexts(), [] as [serde_json::Value; 0]);
 }
 
 fn events(chain: &[serde_json::Value]) -> Vec<String> {
@@ -573,7 +573,7 @@ fn a_step_on_an_unknown_context_is_refused_without_a_record() {
     assert_eq!(code, 2);
     assert_eq!(r["refused"], "CONTEXT_NOT_FOUND");
     assert_eq!(r["recorded"], false);
-    assert!(s.chain("ctx_nope").is_empty());
+    assert_eq!(s.chain("ctx_nope"), [] as [serde_json::Value; 0]);
 }
 
 #[test]
