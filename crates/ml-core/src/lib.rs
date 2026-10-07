@@ -16,7 +16,7 @@
 //! | Call | Input | Guarantees |
 //! |---|---|---|
 //! | [`Ledger::authorize`] | signed [`Mandate`] + normalized [`Cart`] + request key | signature, signer trust, revocation, scope, per-txn cap, velocity, total budget (atomic) |
-//! | [`Ledger::record_payment`] | [`Authorized`] + rail proof | amount match, cart/context binding, single-use nonce |
+//! | [`Ledger::record_payment`] | [`Authorized`] + rail proof | amount match, cart/context binding, payee when the proof names one, single-use nonce |
 //! | [`Ledger::record_settlement`] | [`Paid`] + finality evidence | finality per rail policy; releases budget on failure |
 //! | [`Ledger::record_delivery`] | [`Settled`] + receipt | only reachable from `Settled` — enforced by types *and* store |
 //! | [`Ledger::evidence`] | context id | self-verifying hash chain |

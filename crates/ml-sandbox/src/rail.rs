@@ -127,6 +127,7 @@ impl Rail for SandboxRail {
             amount: proof.amount.clone(),
             bound_ctx: proof.bound_ctx.clone(),
             bound_cart: proof.bound_cart,
+            bound_merchant: proof.bound_merchant.clone(),
         })
     }
 

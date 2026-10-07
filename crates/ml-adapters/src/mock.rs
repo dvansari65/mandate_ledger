@@ -4,7 +4,7 @@
 //! what the proof claims, so tests can confirm the engine catches mismatches.
 
 use ml_core::{
-    ContextId, FinalityStatus, Hash32, Money, PaymentExpectation, Rail, RailError,
+    ContextId, FinalityStatus, Hash32, MerchantId, Money, PaymentExpectation, Rail, RailError,
     SettlementExpectation, VerifiedProof,
 };
 
@@ -21,6 +21,8 @@ pub struct MockProof {
     pub bound_ctx: Option<ContextId>,
     /// Cart hash the proof claims to bind to.
     pub bound_cart: Option<Hash32>,
+    /// Merchant the proof claims to pay.
+    pub bound_merchant: Option<MerchantId>,
     /// Whether the "signature" verifies.
     pub valid: bool,
 }
@@ -36,6 +38,7 @@ impl MockProof {
             amount,
             bound_ctx: Some(ctx.clone()),
             bound_cart: None,
+            bound_merchant: None,
             valid: true,
         }
     }
@@ -116,6 +119,7 @@ impl Rail for MockRail {
             amount: proof.amount.clone(),
             bound_ctx: proof.bound_ctx.clone(),
             bound_cart: proof.bound_cart,
+            bound_merchant: proof.bound_merchant.clone(),
         })
     }
 

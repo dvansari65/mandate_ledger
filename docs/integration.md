@@ -60,7 +60,9 @@ let paid = ledger.record_payment(&auth, &proof)?;
 Your `Rail::verify_proof` must return a `VerifiedProof` with at least one of
 `bound_ctx` / `bound_cart` populated. For a PSP, that means reading your
 context id back out of the payment's metadata. A proof that binds to
-nothing is denied `UNBOUND_PROOF`.
+nothing is denied `UNBOUND_PROOF`. If the proof names its payee (x402
+`payTo`, a PSP account), fill `bound_merchant` too: a payee other than the
+authorized merchant is denied `MERCHANT_BINDING_MISMATCH`.
 
 ## 5. Settle, then deliver
 
@@ -128,6 +130,7 @@ impl Rail for RazorpayRail {
             amount: p.amount()?,
             bound_ctx: p.notes.get("ml_ctx").map(ContextId::new).transpose()?,
             bound_cart: None,
+            bound_merchant: None,               // a PSP pays your account; x402 names a payTo
         })
     }
 

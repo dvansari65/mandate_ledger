@@ -162,8 +162,9 @@ ml deliver ctx_… --receipt BB-88121 --signed-by bb-2026
 decide for itself, and they are how the attack scripts drive the engine:
 `--nonce` (defaults to the reference; present one for a second context to
 replay a payment), `--bound-cart HASH` (the hash of another cart is a swap —
-`ml cart sign` and `ml authorize` both print the hash), `--unbound`,
-`--invalid`. Every one of them is refused by the engine, not by the command.
+`ml cart sign` and `ml authorize` both print the hash), `--bound-merchant ID`
+(anyone but the authorized merchant is a redirect), `--unbound`, `--invalid`.
+Every one of them is refused by the engine, not by the command.
 
 `settle` asks the rail for finality: `--confirmations N` is final at 1 and
 `pending` below that — nothing is recorded, ask again later — and

@@ -436,41 +436,26 @@ fn pay_refuses_replayed_swapped_unbound_and_invalid_proofs() {
     let cart = s.cart("cart", "10.00");
     let a = s.authorized(&cart, "o1");
     let b = s.authorized(&cart, "o2");
-    let refused = |args: &[&str]| {
-        let (code, r, err) = s.step(args);
+    // The engine's answer to a proof for a's amount under the good
+    // reference, plus whatever is wrong with it.
+    let pay_a = |extra: &[&str]| {
+        let mut args: Vec<&str> = vec!["pay", &a, "--reference", &good, "--amount", "10.00 INR"];
+        args.extend_from_slice(extra);
+        s.step(&args)
+    };
+    // A recorded refusal, by code.
+    let refused = |(code, r, err): (i32, serde_json::Value, String)| {
         assert_eq!(code, 2, "{err}");
         assert_eq!(r["recorded"], true, "{r}");
         r["refused"].as_str().unwrap().to_owned()
     };
 
     assert_eq!(
-        refused(&["pay", &a, "--reference", &good, "--amount", "9.00 INR"]),
+        refused(s.step(&["pay", &a, "--reference", &good, "--amount", "9.00 INR"])),
         "AMOUNT_MISMATCH"
     );
-    assert_eq!(
-        refused(&[
-            "pay",
-            &a,
-            "--reference",
-            &good,
-            "--amount",
-            "10.00 INR",
-            "--invalid"
-        ]),
-        "PROOF_INVALID"
-    );
-    assert_eq!(
-        refused(&[
-            "pay",
-            &a,
-            "--reference",
-            &good,
-            "--amount",
-            "10.00 INR",
-            "--unbound"
-        ]),
-        "UNBOUND_PROOF"
-    );
+    assert_eq!(refused(pay_a(&["--invalid"])), "PROOF_INVALID");
+    assert_eq!(refused(pay_a(&["--unbound"])), "UNBOUND_PROOF");
 
     // The hash of another cart: a swap.
     let raw = s.dir.join("other.raw.json");
@@ -485,24 +470,21 @@ fn pay_refuses_replayed_swapped_unbound_and_invalid_proofs() {
     assert_eq!(code, 0, "{err}");
     let other = json(&out)["hash"].as_str().unwrap().to_owned();
     assert_eq!(
-        refused(&[
-            "pay",
-            &a,
-            "--reference",
-            &good,
-            "--amount",
-            "10.00 INR",
-            "--bound-cart",
-            &other
-        ]),
+        refused(pay_a(&["--bound-cart", &other])),
         "CART_BINDING_MISMATCH"
     );
 
-    // A good proof pays a; the same nonce cannot pay b.
-    let (code, _, err) = s.step(&["pay", &a, "--reference", &good, "--amount", "10.00 INR"]);
+    // Paying someone else, however well the proof binds: a redirect.
+    assert_eq!(
+        refused(pay_a(&["--bound-merchant", "attacker.example"])),
+        "MERCHANT_BINDING_MISMATCH"
+    );
+
+    // A good proof, naming the merchant, pays a; the same nonce cannot pay b.
+    let (code, _, err) = pay_a(&["--bound-merchant", "BigBasket.com"]);
     assert_eq!(code, 0, "{err}");
     assert_eq!(
-        refused(&[
+        refused(s.step(&[
             "pay",
             &b,
             "--reference",
@@ -511,7 +493,7 @@ fn pay_refuses_replayed_swapped_unbound_and_invalid_proofs() {
             "10.00 INR",
             "--nonce",
             &good
-        ]),
+        ])),
         "NONCE_ALREADY_USED"
     );
 
@@ -527,7 +509,8 @@ fn pay_refuses_replayed_swapped_unbound_and_invalid_proofs() {
             "AMOUNT_MISMATCH",
             "PROOF_INVALID",
             "UNBOUND_PROOF",
-            "CART_BINDING_MISMATCH"
+            "CART_BINDING_MISMATCH",
+            "MERCHANT_BINDING_MISMATCH"
         ]
     );
 }

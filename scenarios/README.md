@@ -21,7 +21,7 @@ nothing else is using.
 
 | Script | Row | What is driven, and what must happen |
 |---|---|---|
-| `01-cart-swap` | A5 | A proof bound to another cart's hash, one for another amount, one bound to nothing: `CART_BINDING_MISMATCH`, `AMOUNT_MISMATCH`, `UNBOUND_PROOF`, each recorded. The proof for the approved cart pays, settles, delivers. |
+| `01-cart-swap` | A5, A10 | A proof bound to another cart's hash, one for another amount, one bound to nothing, one paying someone else: `CART_BINDING_MISMATCH`, `AMOUNT_MISMATCH`, `UNBOUND_PROOF`, `MERCHANT_BINDING_MISMATCH`, each recorded. The proof for the approved cart, naming the approved merchant, pays, settles, delivers. |
 | `02-replayed-proof` | A1, A2 | The same proof retried is the same payment and adds nothing to the chain. Its nonce presented for a second context, under any reference: `NONCE_ALREADY_USED`, recorded against that context. |
 | `03-deliver-before-final` | A3 | Delivery before payment, while pending, and short of the finality threshold: `INVALID_STATE` with nothing recorded, because the type system refused before the engine could be asked. The chain stays `authorized paid` until the rail calls it final. |
 | `04-revoked-mandate` | A8 | After `ml revoke`, a new purchase is `MANDATE_REVOKED`, recorded, and reserves nothing. The purchase authorized before it continues to delivery, and its retry is still that purchase. |
