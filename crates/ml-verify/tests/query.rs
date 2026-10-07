@@ -49,8 +49,8 @@ fn the_log_spans_contexts_and_pages_by_seq() {
     assert_eq!(paged, all);
     let end = all.last().unwrap().seq;
     assert_eq!(h.store.last_seq().unwrap(), end);
-    assert!(h.store.events_after(end, 100).unwrap().is_empty());
-    assert!(h.store.events_after(0, 0).unwrap().is_empty());
+    assert_eq!(h.store.events_after(end, 100).unwrap(), []);
+    assert_eq!(h.store.events_after(0, 0).unwrap(), []);
 }
 
 #[test]
@@ -109,5 +109,5 @@ fn scan_filters_by_mandate_and_state_in_byte_order() {
         mandate: Some(m2.id().clone()),
         state: Some(PaymentState::Paid),
     };
-    assert!(h.store.scan(&paid_under_m2, 10).unwrap().is_empty());
+    assert_eq!(h.store.scan(&paid_under_m2, 10).unwrap(), []);
 }

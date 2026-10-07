@@ -13,7 +13,7 @@ mandate, the cart, the proof and the finality disagree, and records why.
 - [x] `ml pay` / `settle` / `compensate` / `deliver` / `expire` / `revoke`
 - [x] `ml evidence` / `ml verify` — verification with no database
 - [x] Controllable rail (`…-ok`, `…-fail`, `…-reorg`), `--rail`, and a test clock
-- [ ] Eight scenario scripts, one per threat-model row, run by a CI job
+- [x] Eight scenario scripts, one per threat-model row, run by a CI job
       against the PostgreSQL service
 
 ### 2. Close the engine gaps found in review
