@@ -3,15 +3,16 @@
 //! The proof is the mock rail's, so this command exposes what a real rail
 //! would decide for itself — the reference, the single-use nonce, the amount
 //! and what the proof is bound to. Those knobs are how the attack scripts
-//! replay a nonce, swap a cart or present an unbound proof, and every one of
-//! them is refused by the engine, not by this command.
+//! replay a nonce, swap a cart, pay someone else or present an unbound
+//! proof, and every one of them is refused by the engine, not by this
+//! command.
 
 use crate::Failure;
 use crate::engine::{self, DbArgs, RailArgs, TrustArgs};
 use crate::report::Report;
 use clap::Args;
 use ml_adapters::MockProof;
-use ml_core::{DenyReason, Hash32, Money, Stage};
+use ml_core::{DenyReason, Hash32, MerchantId, Money, Stage};
 
 #[derive(Args)]
 pub struct Cmd {
@@ -41,6 +42,11 @@ pub struct Cmd {
     #[arg(long, value_name = "HASH")]
     bound_cart: Option<Hash32>,
 
+    /// Name the merchant the proof pays. Anyone but the authorized merchant
+    /// is a redirect.
+    #[arg(long, value_name = "MERCHANT", value_parser = merchant)]
+    bound_merchant: Option<MerchantId>,
+
     /// Do not bind the proof to the context. Alone, that is a proof bound to
     /// nothing; with --bound-cart, a proof bound to the cart only.
     #[arg(long)]
@@ -58,6 +64,11 @@ pub struct Cmd {
 
     #[command(flatten)]
     rail: RailArgs,
+}
+
+/// A merchant id from the command line, normalized as the engine does.
+fn merchant(s: &str) -> Result<MerchantId, String> {
+    MerchantId::new(s).map_err(|e| e.to_string())
 }
 
 pub fn run(cmd: &Cmd) -> Result<Report, Failure> {
@@ -78,6 +89,7 @@ pub fn run(cmd: &Cmd) -> Result<Report, Failure> {
         amount: cmd.amount.clone(),
         bound_ctx: (!cmd.unbound).then(|| ctx.clone()),
         bound_cart: cmd.bound_cart,
+        bound_merchant: cmd.bound_merchant.clone(),
         valid: !cmd.invalid,
     };
     // Always through the `Authorized` token: on a context that is already

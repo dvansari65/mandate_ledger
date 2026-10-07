@@ -17,7 +17,7 @@ mandate, the cart, the proof and the finality disagree, and records why.
       against the PostgreSQL service
 
 ### 2. Close the engine gaps found in review
-- [ ] Payee binding: `VerifiedProof.bound_merchant`, `MERCHANT_BINDING_MISMATCH`
+- [x] Payee binding: `VerifiedProof.bound_merchant`, `MERCHANT_BINDING_MISMATCH`
 - [ ] B4: `authorize` replay compares the stored mandate — `CONTEXT_MISMATCH`
 - [ ] B6: cap `Denied` events per context (the audit path is a storage DoS)
 - [ ] Keyset paging for `scan`; `MemoryStore` pruning; the test suite's

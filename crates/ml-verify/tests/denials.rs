@@ -247,6 +247,50 @@ fn a1_a2_a5_payment_binding_and_nonce() {
 }
 
 #[test]
+fn a10_the_payee_must_be_the_authorized_merchant() {
+    let h = harness();
+    let a = h
+        .ledger
+        .authorize(&mandate(), &cart("bigbasket.com", "100"), "o1")
+        .unwrap();
+
+    // Bound to the right context and the right cart, paying someone else.
+    let redirected = MockProof {
+        bound_cart: Some(*a.cart_hash()),
+        bound_merchant: Some(MerchantId::new("attacker.example").unwrap()),
+        ..MockProof::bound_to(a.ctx(), "p", inr("100"))
+    };
+    assert_eq!(
+        reason(&h.ledger.record_payment(&a, &redirected).unwrap_err()),
+        DenyReason::MerchantBindingMismatch
+    );
+
+    // The payee is not a binding on its own: the right merchant, for nothing
+    // in particular, is still an unbound proof.
+    let payee_only = MockProof {
+        bound_ctx: None,
+        bound_merchant: Some(MerchantId::new("bigbasket.com").unwrap()),
+        ..MockProof::bound_to(a.ctx(), "p", inr("100"))
+    };
+    assert_eq!(
+        reason(&h.ledger.record_payment(&a, &payee_only).unwrap_err()),
+        DenyReason::UnboundProof
+    );
+
+    // Compared as merchant ids are normalized, so spelling is not a mismatch.
+    let honest = MockProof {
+        bound_merchant: Some(MerchantId::new(" BigBasket.COM ").unwrap()),
+        ..MockProof::bound_to(a.ctx(), "p", inr("100"))
+    };
+    h.ledger.record_payment(&a, &honest).unwrap();
+    assert_eq!(
+        h.ledger.evidence(a.ctx()).unwrap().unwrap().events.len(),
+        4,
+        "two refusals, one payment"
+    );
+}
+
+#[test]
 fn a3_delivery_requires_settlement_at_the_store_too() {
     // The type system already prevents `record_delivery(&paid, ..)`.
     // This checks the store's independent guard against a hand-built event.

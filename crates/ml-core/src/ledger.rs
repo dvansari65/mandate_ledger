@@ -275,7 +275,8 @@ where
         }
     }
 
-    /// Amount and binding checks for a verified proof (properties P1, P2).
+    /// Amount, binding and payee checks for a verified proof (properties
+    /// P1, P2, P18).
     fn check_proof_binding(
         &self,
         ctx: &ContextId,
@@ -297,22 +298,37 @@ where
         }
         let ctx_ok = verified.bound_ctx.as_ref().map(|c| c == ctx);
         let cart_ok = verified.bound_cart.as_ref().map(|h| *h == rec.cart_hash);
-        let (reason, detail) = match (ctx_ok, cart_ok) {
-            (None, None) => (
+        let binding = match (ctx_ok, cart_ok) {
+            (None, None) => Some((
                 DenyReason::UnboundProof,
                 "proof binds to neither context nor cart",
-            ),
-            (Some(false), _) => (
+            )),
+            (Some(false), _) => Some((
                 DenyReason::ContextBindingMismatch,
                 "proof binds to a different context",
-            ),
-            (_, Some(false)) => (
+            )),
+            (_, Some(false)) => Some((
                 DenyReason::CartBindingMismatch,
                 "proof binds to a different cart",
-            ),
-            _ => return Ok(()),
+            )),
+            _ => None,
         };
-        self.deny(ctx, now, Stage::Payment, reason, detail.to_owned())
+        if let Some((reason, detail)) = binding {
+            return self.deny(ctx, now, Stage::Payment, reason, detail.to_owned());
+        }
+        // The payee, when the proof names one. A payment to anyone but the
+        // authorized merchant is a redirect, however well it binds to the
+        // cart; a proof that names no payee is not checked for one.
+        match &verified.bound_merchant {
+            Some(payee) if *payee != rec.merchant => self.deny(
+                ctx,
+                now,
+                Stage::Payment,
+                DenyReason::MerchantBindingMismatch,
+                format!("proof pays {payee}, authorized {}", rec.merchant),
+            ),
+            _ => Ok(()),
+        }
     }
 
     // ────────────────────────── record_settlement ────────────────────────

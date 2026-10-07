@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Threat model A5 — cart swap (P1, P2).
+# Threat model A5 — cart swap (P1, P2); A10 — redirect (P18).
 #
-# The cart approved is the cart paid. A proof bound to another cart's hash,
-# a proof for another amount, and a proof bound to nothing are each refused
-# and recorded; the proof for the approved cart then pays, settles and
-# delivers, and the chain carries all of it.
+# The cart approved is the cart paid, and the merchant approved is the
+# merchant paid. A proof bound to another cart's hash, a proof for another
+# amount, a proof bound to nothing, and a proof paying someone else are each
+# refused and recorded; the proof for the approved cart, naming the approved
+# merchant, then pays, settles and delivers, and the chain carries all of it.
 
 # shellcheck source=lib.sh
 . "$(dirname "$0")/lib.sh"
@@ -28,12 +29,15 @@ expect_detail "authorized 128.00 INR" "the refusal names the authorized amount"
 step pay "$ctx" --reference "$(ref pay-ok)" --amount "128.00 INR" --unbound
 expect_refused UNBOUND_PROOF true "a proof bound to neither context nor cart"
 
-step pay "$ctx" --reference "$(ref pay-ok)" --amount "128.00 INR" --bound-cart "$(cart_hash approved)"
-expect_allowed "the proof for the approved cart pays" state=paid
+step pay "$ctx" --reference "$(ref pay-ok)" --amount "128.00 INR" --bound-merchant attacker.example
+expect_refused MERCHANT_BINDING_MISMATCH true "a proof paying someone other than the approved merchant"
+
+step pay "$ctx" --reference "$(ref pay-ok)" --amount "128.00 INR" --bound-cart "$(cart_hash approved)" --bound-merchant bigbasket.com
+expect_allowed "the proof for the approved cart, naming the approved merchant, pays" state=paid
 step settle "$ctx"
 expect_allowed "the rail calls it final" state=settled
 step deliver "$ctx" --receipt BB-1 --signed-by bb
 expect_allowed "the merchant delivers" state=delivered
 
-expect_chain "$ctx" "authorized denied:CART_BINDING_MISMATCH denied:AMOUNT_MISMATCH denied:UNBOUND_PROOF paid settled delivered"
+expect_chain "$ctx" "authorized denied:CART_BINDING_MISMATCH denied:AMOUNT_MISMATCH denied:UNBOUND_PROOF denied:MERCHANT_BINDING_MISMATCH paid settled delivered"
 verify_evidence "$ctx"

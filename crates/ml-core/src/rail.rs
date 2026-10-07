@@ -27,6 +27,9 @@ pub struct PaymentExpectation<'a> {
 /// At least one of `bound_ctx` / `bound_cart` must be `Some`, or the engine
 /// denies `UNBOUND_PROOF`: a proof that cannot be tied to what was
 /// authorized is not evidence of paying for *this* cart (property P1).
+/// `bound_merchant` is checked when present but is not a binding on its
+/// own: paying the right merchant for something else is still not paying
+/// for this cart.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VerifiedProof {
     /// The rail's reference for the payment (payment id, tx hash…).
@@ -42,6 +45,11 @@ pub struct VerifiedProof {
     /// The cart hash the proof carries, if the protocol binds to it
     /// (AP2 payment mandate, x402 resource hash…).
     pub bound_cart: Option<Hash32>,
+    /// The payee the proof names, if the protocol carries one (x402
+    /// `payTo`, a PSP account…). It must be the authorized merchant, or the
+    /// engine denies `MERCHANT_BINDING_MISMATCH`: a payment to anyone else
+    /// is a redirect, however well it binds to the cart (property P18).
+    pub bound_merchant: Option<MerchantId>,
 }
 
 /// What the engine recorded at payment, handed to the rail for finality.

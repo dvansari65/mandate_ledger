@@ -81,6 +81,8 @@ deny_reasons! {
     CartBindingMismatch => "CART_BINDING_MISMATCH",
     /// The proof binds to a different context id.
     ContextBindingMismatch => "CONTEXT_BINDING_MISMATCH",
+    /// The proof pays a different merchant than the one authorized (property P18).
+    MerchantBindingMismatch => "MERCHANT_BINDING_MISMATCH",
     /// The proof's nonce was already consumed by another context (property P3).
     NonceAlreadyUsed => "NONCE_ALREADY_USED",
     /// The rail rejected the finality evidence.
