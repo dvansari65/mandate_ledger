@@ -291,6 +291,41 @@ fn a10_the_payee_must_be_the_authorized_merchant() {
 }
 
 #[test]
+fn a14_a_retry_must_present_the_mandate_the_context_was_authorized_under() {
+    let h = harness();
+    let m = mandate();
+    let c = cart("bigbasket.com", "100");
+    let a = h.ledger.authorize(&m, &c, "o1").unwrap();
+
+    // The same mandate again is the same purchase attempt.
+    assert_eq!(h.ledger.authorize(&m, &c, "o1").unwrap().ctx(), a.ctx());
+
+    // The same body signed by someone else lands on the same context, since
+    // the id is what the context derives from — and is not handed its token.
+    let attacker = SigningKey::from_bytes(&[42u8; 32]);
+    let forged = Mandate::sign(m.body.clone(), &attacker).unwrap();
+    assert_eq!(
+        reason(&h.ledger.authorize(&forged, &c, "o1").unwrap_err()),
+        DenyReason::ContextMismatch
+    );
+
+    // The same id and signer with a wider scope is not that purchase either.
+    let mut wider = scope();
+    wider.max_per_txn = None;
+    let widened = mandate_with("mnd-1", wider);
+    assert_eq!(
+        reason(&h.ledger.authorize(&widened, &c, "o1").unwrap_err()),
+        DenyReason::ContextMismatch
+    );
+
+    // Both refusals are on the context's chain, nothing more was reserved,
+    // and the honest retry still answers.
+    assert_eq!(h.ledger.evidence(a.ctx()).unwrap().unwrap().events.len(), 3);
+    assert_eq!(h.store.reserved(m.id()).unwrap(), Some(inr("100")));
+    assert_eq!(h.ledger.authorize(&m, &c, "o1").unwrap().ctx(), a.ctx());
+}
+
+#[test]
 fn a3_delivery_requires_settlement_at_the_store_too() {
     // The type system already prevents `record_delivery(&paid, ..)`.
     // This checks the store's independent guard against a hand-built event.

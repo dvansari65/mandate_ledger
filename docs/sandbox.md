@@ -126,7 +126,10 @@ Checks the cart against the mandate and reserves its total. Prints the
 context id — the handle every later step takes — the merchant and the
 amount. `--request-key` is the idempotency key for this purchase attempt:
 the same mandate, cart and key from any process land on the same context and
-reserve nothing twice.
+reserve nothing twice. A different mandate under the same id — re-signed by
+another key, or with another scope — lands there too and is refused
+`CONTEXT_MISMATCH`: a retry has to present the mandate the context was
+authorized under.
 
 `--trust PRINCIPAL=KEYFILE` is the signer policy: which key may sign
 mandates for which principal. Without it every mandate is refused

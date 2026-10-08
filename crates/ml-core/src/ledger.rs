@@ -74,13 +74,18 @@ where
     ///
     /// `request_key` is the caller's idempotency key for *this purchase
     /// attempt*. Retrying with the same `(mandate, cart, request_key)` returns
-    /// the same [`Authorized`] and reserves nothing twice.
+    /// the same [`Authorized`] and reserves nothing twice. The retry has to
+    /// present the mandate the context was authorized under: the context id
+    /// is derived from the mandate's *id*, so a different mandate claiming
+    /// that id — another scope, another signer — lands on the same context,
+    /// and is refused `CONTEXT_MISMATCH` rather than handed its token.
     ///
-    /// Order of checks: replay → signature → signer trust → revocation →
-    /// scope (validity, attestation, merchant, category, currency, per-txn)
-    /// → revocation again, velocity and budget (atomically, in the store).
-    /// The early revocation check is a fast exit; the one inside the store is
-    /// the guarantee, because a `revoke` can land between the two.
+    /// Order of checks: replay (the same mandate, or `CONTEXT_MISMATCH`) →
+    /// signature → signer trust → revocation → scope (validity, attestation,
+    /// merchant, category, currency, per-txn) → revocation again, velocity
+    /// and budget (atomically, in the store). The early revocation check is
+    /// a fast exit; the one inside the store is the guarantee, because a
+    /// `revoke` can land between the two.
     pub fn authorize(
         &self,
         mandate: &Mandate,
@@ -91,7 +96,7 @@ where
         let ctx = ContextId::derive(mandate.id(), cart.hash(), request_key);
 
         if let Some(rec) = self.store.record(&ctx)? {
-            return Ok(authorized_from(&rec));
+            return self.replay(&ctx, now, &rec, mandate);
         }
 
         if let Err(e) = mandate.verify() {
@@ -178,6 +183,47 @@ where
                 Err(StoreError::Corrupt("nonce outcome returned for Authorized".to_owned()).into())
             }
         }
+    }
+
+    /// A context that exists is a purchase attempt already decided. The
+    /// same mandate gets its token back; a different mandate claiming the
+    /// same id does not. The cart and the request key cannot differ — they
+    /// are in the context id — so the mandate is the one thing to compare,
+    /// and the `Authorized` event holds it exactly as it was presented.
+    fn replay(
+        &self,
+        ctx: &ContextId,
+        now: Timestamp,
+        rec: &Record,
+        mandate: &Mandate,
+    ) -> Result<Authorized, LedgerError> {
+        let stored = self
+            .store
+            .events(ctx)?
+            .into_iter()
+            .find_map(|e| match e.body {
+                EventBody::Authorized { mandate, .. } => Some(mandate),
+                _ => None,
+            })
+            .ok_or_else(|| corrupt("a record without an Authorized event"))?;
+        if stored == *mandate {
+            return Ok(authorized_from(rec));
+        }
+        let what = if stored.body == mandate.body {
+            "the same mandate signed by a different key"
+        } else {
+            "a different mandate with the same id"
+        };
+        self.deny(
+            ctx,
+            now,
+            Stage::Authorize,
+            DenyReason::ContextMismatch,
+            format!(
+                "context was authorized under mandate {}; this is {what}",
+                stored.body.id
+            ),
+        )
     }
 
     // ─────────────────────────── record_payment ──────────────────────────

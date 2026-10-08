@@ -48,7 +48,10 @@ let auth = match ledger.authorize(&mandate, &cart, &request_key) {
 ```
 
 `request_key` is *your* idempotency key for this purchase attempt. Same
-mandate + same cart + same key → same context, nothing reserved twice.
+mandate + same cart + same key → same context, nothing reserved twice. A
+different mandate claiming the same id — another scope, another signer —
+lands on that context and is refused `CONTEXT_MISMATCH` rather than handed
+its token.
 
 ## 4. Record payment (webhook handler)
 

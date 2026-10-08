@@ -20,7 +20,7 @@ Properties P1–P18 are from "A Formal Analysis of Agent Payment Protocols" (arX
 | A11 | HTTP 402 confusion                  | —       | strict schema validation; malformed = no payment |
 | A12 | Denial-of-settlement                | P13     | reserve settlement capacity before execution |
 | A13 | Validity-window expiry              | —       | refuse if `expires_at - now < settlement_p99` |
-| A14 | Cross-stage identity mismatch       | P7, P15 | single `InvocationContext` id |
+| A14 | Cross-stage identity mismatch       | P7, P15 | single `InvocationContext` id; a replayed `authorize` must present the mandate the context was authorized under (`CONTEXT_MISMATCH`) |
 | A15 | Secrets in logs                     | P16     | `Secret<T>` newtype, redacting Debug |
 
 ## B — Effect bounded / evidence produced, root cause not prevented

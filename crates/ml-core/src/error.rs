@@ -71,6 +71,8 @@ deny_reasons! {
     InvalidState => "INVALID_STATE",
     /// No context with this id exists.
     ContextNotFound => "CONTEXT_NOT_FOUND",
+    /// The context exists, but was authorized under a different mandate claiming the same id.
+    ContextMismatch => "CONTEXT_MISMATCH",
     /// The rail rejected the payment proof.
     ProofInvalid => "PROOF_INVALID",
     /// The proof's amount differs from the authorized amount.

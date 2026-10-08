@@ -60,6 +60,7 @@ the question. This library is the layer that asks it.
 | One payment nonce, one payment | the store claims nonces atomically on append, arbitrated by a unique index |
 | The cart approved is the cart paid | the cart hash is bound at `authorize` and checked at `record_payment` |
 | The merchant approved is the merchant paid | the payee a proof names is checked against the authorized merchant at `record_payment` |
+| A retry is the same purchase; a forgery is not | a replayed `authorize` must present the mandate the context was authorized under, or it is `CONTEXT_MISMATCH` |
 | Budgets hold under concurrency | the reservation is applied inside the store's append, in one transaction |
 | Mandates can be revoked | `revoke()` — every later `authorize` is denied, decided inside the store's append so a revocation cannot race an authorization |
 | Refusals are auditable | denials are ledger events, with stable machine-readable codes |
@@ -164,7 +165,7 @@ a payment gateway and a wallet.
 | `evidence` | context id | `EvidenceBundle` — the hash chain |
 
 A denial is a decision: final, machine-readable, and never to be retried.
-There are 25 stable codes — `SCOPE_MERCHANT_MISMATCH`, `NONCE_ALREADY_USED`
+There are 26 stable codes — `SCOPE_MERCHANT_MISMATCH`, `NONCE_ALREADY_USED`
 and the rest — enumerated by `ml_core::DenyReason`. Operational failures, such
 as the store being unreachable, are separate error variants, and those *are*
 worth retrying.

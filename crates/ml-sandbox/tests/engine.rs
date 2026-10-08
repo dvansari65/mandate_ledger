@@ -234,6 +234,36 @@ fn authorize_then_read_it_back_from_fresh_processes() {
 }
 
 #[test]
+fn a_different_mandate_under_the_same_id_cannot_take_over_a_context() {
+    let Some(url) = database() else { return };
+    let s = Setup::new("takeover", url);
+    let cart = s.cart("cart", "10.00");
+    let ctx = s.authorized(&cart, "order-1");
+
+    // The same body signed by a key the operator does not trust, under the
+    // same request key: it lands on the same context and is refused there.
+    let attacker = new_key(&s.dir, "attacker.key");
+    let forged = sign_mandate_as(
+        &s.dir,
+        "forged.json",
+        &body(&s.mandate_id, &s.principal),
+        &attacker,
+    );
+    let (code, r, err) = authorize_under(&forged, &cart, "order-1", &s.trust_args());
+    assert_eq!(code, 2, "{err}");
+    assert_eq!(r["refused"], "CONTEXT_MISMATCH");
+    assert_eq!(r["recorded"], true);
+    assert_eq!(r["context"], ctx);
+
+    // The honest retry, from a fresh process, is still that purchase.
+    let (code, r, err) = s.authorize(&cart, "order-1", &s.trust_args());
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(r["context"], ctx);
+    assert_eq!(events(&s.chain(&ctx)), ["authorized", "denied"]);
+    assert_eq!(s.contexts().len(), 1);
+}
+
+#[test]
 fn a_refusal_is_a_decision_with_exit_2_and_a_record() {
     let Some(url) = database() else { return };
     let s = Setup::new("refusal", url);
