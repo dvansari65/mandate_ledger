@@ -174,6 +174,44 @@ fn authorize_is_idempotent_and_reserves_once() {
 }
 
 #[test]
+fn a_retry_must_present_the_same_mandate_through_the_round_trip() {
+    let f = pg_or_skip!("retry-mandate");
+    let ledger = f.ledger();
+    let cart = f.cart("100.00");
+    // Every optional scope field absent, so the stored JSON carries nulls.
+    let m = f.mandate_with(Scope {
+        max_total: None,
+        ..f.scope()
+    });
+    let a = ledger.authorize(&m, &cart, "order-1").unwrap();
+    assert_eq!(
+        ledger.authorize(&m, &cart, "order-1").unwrap().ctx(),
+        a.ctx()
+    );
+
+    let refused = |m: &Mandate| ledger.authorize(m, &cart, "order-1").unwrap_err().reason();
+    let forged = Mandate::sign(m.body.clone(), &SigningKey::from_bytes(&[42u8; 32])).unwrap();
+    assert_eq!(refused(&forged), Some(DenyReason::ContextMismatch));
+    let widened = f.mandate_with(Scope {
+        max_per_txn: None,
+        ..f.scope()
+    });
+    assert_eq!(refused(&widened), Some(DenyReason::ContextMismatch));
+    let mut corrupted = m.clone();
+    corrupted.signature[0] ^= 1;
+    assert_eq!(
+        refused(&corrupted),
+        Some(DenyReason::MandateSignatureInvalid)
+    );
+
+    assert_eq!(f.store.events(a.ctx()).unwrap().len(), 4);
+    assert_eq!(
+        ledger.authorize(&m, &cart, "order-1").unwrap().ctx(),
+        a.ctx()
+    );
+}
+
+#[test]
 fn a_failed_settlement_releases_the_reservation() {
     let f = pg_or_skip!("release");
     let m = f.mandate();

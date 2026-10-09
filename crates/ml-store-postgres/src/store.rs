@@ -5,8 +5,8 @@ use crate::convert::{
     record_from_row, state_to_sql,
 };
 use ml_core::{
-    AppendOutcome, ContextId, Event, EventBody, Hash32, MandateId, Money, PaymentState, Record,
-    RecordFilter, Store, StoreError, Timestamp,
+    AppendOutcome, ContextId, Event, EventBody, Hash32, Mandate, MandateId, Money, PaymentState,
+    Record, RecordFilter, Store, StoreError, Timestamp,
 };
 use postgres::{Config, GenericClient, NoTls};
 use r2d2::Pool;
@@ -238,6 +238,29 @@ impl Store for PostgresStore {
             .iter()
             .map(event_from_row)
             .collect()
+    }
+
+    /// One row, read and decoded, whatever else is on the chain.
+    fn authorized_mandate(&self, ctx: &ContextId) -> Result<Option<Mandate>, StoreError> {
+        let mut conn = self.pool.get().map_err(backend)?;
+        let row = conn
+            .query_opt(
+                "SELECT body FROM ml_events \
+                 WHERE ctx = $1 AND body->>'type' = 'authorized' \
+                 ORDER BY seq LIMIT 1",
+                &[&ctx.as_str()],
+            )
+            .map_err(pg)?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let body: serde_json::Value = row.try_get(0).map_err(backend)?;
+        match serde_json::from_value(body).map_err(corrupt)? {
+            EventBody::Authorized { mandate, .. } => Ok(Some(mandate)),
+            _ => Err(StoreError::Corrupt(
+                "an event tagged authorized that is not Authorized".to_owned(),
+            )),
+        }
     }
 
     #[allow(clippy::too_many_lines)] // One transaction; splitting it would hide the ordering.

@@ -132,7 +132,7 @@ another key, or with another scope — lands there too and is refused
 authorized under.
 
 `--trust PRINCIPAL=KEYFILE` is the signer policy: which key may sign
-mandates for which principal. Without it every mandate is refused
+mandates for which principal. Without it every new authorization is refused
 `MANDATE_SIGNER_UNTRUSTED`, because a mandate cannot vouch for its own key.
 That is how production works, and the sandbox does not relax it.
 

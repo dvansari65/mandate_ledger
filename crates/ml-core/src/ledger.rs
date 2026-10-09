@@ -147,7 +147,37 @@ where
             cart: CartSnapshot::from(cart),
             request_key: request_key.to_owned(),
         };
-        match self.store.append(&ctx, now, body)? {
+        let outcome = match self.store.append(&ctx, now, body) {
+            Ok(outcome) => outcome,
+            // Lost a race with a concurrent first authorization of the same
+            // purchase attempt: the record exists now, so this is a retry.
+            Err(StoreError::IllegalTransition {
+                from: Some(_),
+                to: PaymentState::Authorized,
+                ..
+            }) => {
+                let rec = self
+                    .store
+                    .record(&ctx)?
+                    .ok_or_else(|| corrupt("a context that refused Authorized has no record"))?;
+                return self.replay(&ctx, now, &rec, mandate);
+            }
+            Err(e) => return Err(e.into()),
+        };
+        self.authorization(ctx, now, mandate, cart, outcome)
+    }
+
+    /// What the store's answer to an `Authorized` append means: the token,
+    /// or the refusal the store decided under its lock.
+    fn authorization(
+        &self,
+        ctx: ContextId,
+        now: Timestamp,
+        mandate: &Mandate,
+        cart: &Cart,
+        outcome: AppendOutcome,
+    ) -> Result<Authorized, LedgerError> {
+        match outcome {
             AppendOutcome::Appended(_) => Ok(Authorized::new(
                 ctx,
                 mandate.id().clone(),
@@ -185,11 +215,14 @@ where
         }
     }
 
-    /// A context that exists is a purchase attempt already decided. The
-    /// same mandate gets its token back; a different mandate claiming the
-    /// same id does not. The cart and the request key cannot differ — they
-    /// are in the context id — so the mandate is the one thing to compare,
-    /// and the `Authorized` event holds it exactly as it was presented.
+    /// A context that exists is a purchase attempt already decided, and a
+    /// retry has to present the mandate it was decided under: the same body
+    /// from the same signer. The signature is verified, not compared, so a
+    /// body re-signed by the same key is the same mandate and a bad
+    /// signature is refused for what it is. The cart and the request key
+    /// cannot differ — they are in the context id — so the mandate is the
+    /// one thing to compare, and its `Authorized` event holds it as it was
+    /// presented.
     fn replay(
         &self,
         ctx: &ContextId,
@@ -197,32 +230,32 @@ where
         rec: &Record,
         mandate: &Mandate,
     ) -> Result<Authorized, LedgerError> {
+        if let Err(e) = mandate.verify() {
+            return self.deny(
+                ctx,
+                now,
+                Stage::Authorize,
+                DenyReason::MandateSignatureInvalid,
+                e.to_string(),
+            );
+        }
         let stored = self
             .store
-            .events(ctx)?
-            .into_iter()
-            .find_map(|e| match e.body {
-                EventBody::Authorized { mandate, .. } => Some(mandate),
-                _ => None,
-            })
+            .authorized_mandate(ctx)?
             .ok_or_else(|| corrupt("a record without an Authorized event"))?;
-        if stored == *mandate {
-            return Ok(authorized_from(rec));
-        }
-        let what = if stored.body == mandate.body {
+        let detail = if stored.body != mandate.body {
+            "a different mandate with the same id"
+        } else if stored.signer != mandate.signer {
             "the same mandate signed by a different key"
         } else {
-            "a different mandate with the same id"
+            return Ok(authorized_from(rec));
         };
         self.deny(
             ctx,
             now,
             Stage::Authorize,
             DenyReason::ContextMismatch,
-            format!(
-                "context was authorized under mandate {}; this is {what}",
-                stored.body.id
-            ),
+            detail.to_owned(),
         )
     }
 

@@ -6,6 +6,8 @@ use std::sync::Arc;
 
 pub const USER_KEY: [u8; 32] = [7u8; 32];
 pub const MERCHANT_KEY: [u8; 32] = [9u8; 32];
+/// A key nobody trusts for anything.
+pub const ATTACKER_KEY: [u8; 32] = [42u8; 32];
 pub const T0: i64 = 1_800_000_000;
 
 pub type TestLedger = Ledger<Arc<MemoryStore>, MockRail, TrustedSigners, Arc<FixedClock>>;
@@ -16,6 +18,10 @@ pub fn user_key() -> SigningKey {
 
 pub fn merchant_key() -> SigningKey {
     SigningKey::from_bytes(&MERCHANT_KEY)
+}
+
+pub fn attacker_key() -> SigningKey {
+    SigningKey::from_bytes(&ATTACKER_KEY)
 }
 
 pub fn principal() -> PrincipalId {

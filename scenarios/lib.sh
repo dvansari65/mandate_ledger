@@ -276,6 +276,19 @@ scenario_exit() {
     exit "$rc"
 }
 
+# A fresh key pair in WORK/NAME.key; the path is printed.
+new_key() { # name
+    "$ML" keys new --out "$WORK/$1.key" >/dev/null
+    printf '%s' "$WORK/$1.key"
+}
+
+# The body behind WORK/NAME.json signed again by a key of an attacker's
+# own, into WORK/NAME.forged.json; the path is printed.
+forge_mandate() { # name
+    "$ML" mandate sign "$WORK/$1.body.json" --key "$(new_key "$1.attacker")" --out "$WORK/$1.forged.json" >/dev/null
+    printf '%s' "$WORK/$1.forged.json"
+}
+
 # Begin a scenario: a working directory, a run suffix, three key pairs —
 # the principal, the merchant, this host — and the trust flags that make
 # the engine accept the first two.
@@ -291,8 +304,8 @@ scenario() { # name
     HOST_KEY="$WORK/host.key"
     trap scenario_exit EXIT
     printf '%s\n' "$SCENARIO"
-    "$ML" keys new --out "$USER_KEY" >/dev/null
-    "$ML" keys new --out "$MERCHANT_KEY" >/dev/null
-    "$ML" keys new --out "$HOST_KEY" >/dev/null
+    new_key user >/dev/null
+    new_key merchant >/dev/null
+    new_key host >/dev/null
     TRUST=(--trust "$PRINCIPAL=$USER_KEY.pub" --merchant-key "bb=$MERCHANT_KEY.pub")
 }

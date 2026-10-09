@@ -19,7 +19,9 @@ mandate, the cart, the proof and the finality disagree, and records why.
 ### 2. Close the engine gaps found in review
 - [x] Payee binding: `VerifiedProof.bound_merchant`, `MERCHANT_BINDING_MISMATCH`
 - [x] B4: `authorize` replay compares the stored mandate — `CONTEXT_MISMATCH`
-- [ ] B6: cap `Denied` events per context (the audit path is a storage DoS)
+- [ ] B6: cap `Denied` events per context, live ones included — a retry
+      under a forged mandate lands on the chain it names (the audit path is
+      a storage DoS)
 - [ ] Keyset paging for `scan`; `MemoryStore` pruning; the test suite's
       connection budget
 

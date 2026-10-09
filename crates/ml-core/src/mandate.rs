@@ -83,9 +83,12 @@ impl MerchantPattern {
 impl fmt::Display for MerchantPattern {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            // Written as `parse` reads it, so a pattern built by hand with
+            // stray case or whitespace round-trips through serialization
+            // to the same value.
             Self::Any => f.write_str("*"),
-            Self::Exact(e) => f.write_str(e),
-            Self::Suffix(s) => write!(f, "*{s}"),
+            Self::Exact(e) => f.write_str(&e.trim().to_ascii_lowercase()),
+            Self::Suffix(s) => write!(f, "*{}", s.trim().to_ascii_lowercase()),
         }
     }
 }

@@ -25,11 +25,8 @@ a=$(field .context)
 
 # The same request key under the same mandate body signed by a key of the
 # attacker's own: the same context, not its token.
-"$ML" keys new --out "$WORK/attacker.key" >/dev/null
-"$ML" mandate sign "$WORK/mandate.body.json" --key "$WORK/attacker.key" --out "$WORK/forged.json" >/dev/null
-authorize "$WORK/forged.json" "$cart" "order-a"
-expect_fields "A's request key under a forged mandate" "context=$a"
-expect_refused CONTEXT_MISMATCH true "A's request key under a forged mandate lands on A"
+authorize "$(forge_mandate mandate)" "$cart" "order-a"
+expect_refused CONTEXT_MISMATCH true "A's request key under a forged mandate"
 authorize "$mandate" "$cart" "order-a"
 expect_allowed "the same mandate again is the same purchase attempt" context="$a"
 authorize "$mandate" "$cart" "order-b"

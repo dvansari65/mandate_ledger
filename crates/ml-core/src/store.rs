@@ -14,6 +14,7 @@ use crate::error::StoreError;
 use crate::event::{Event, EventBody};
 use crate::hash::Hash32;
 use crate::ids::{ContextId, MandateId, MerchantId};
+use crate::mandate::Mandate;
 use crate::money::Money;
 use crate::state::PaymentState;
 use crate::time::Timestamp;
@@ -103,6 +104,13 @@ pub trait Store: Send + Sync {
 
     /// All events for `ctx`, in order.
     fn events(&self, ctx: &ContextId) -> Result<Vec<Event>, StoreError>;
+
+    /// The mandate `ctx` was authorized under — the one in its `Authorized`
+    /// event — or `None` if it has none. The default reads the whole chain;
+    /// a store that can reach that one event directly should.
+    fn authorized_mandate(&self, ctx: &ContextId) -> Result<Option<Mandate>, StoreError> {
+        Ok(crate::evidence::authorized_mandate(&self.events(ctx)?).cloned())
+    }
 
     /// Append `body` to `ctx`'s chain and apply its side effects, atomically.
     ///
@@ -233,6 +241,16 @@ impl Store for MemoryStore {
             .get(ctx)
             .map(|idx| idx.iter().map(|&i| g.events[i].clone()).collect())
             .unwrap_or_default())
+    }
+
+    fn authorized_mandate(&self, ctx: &ContextId) -> Result<Option<Mandate>, StoreError> {
+        let g = self.lock()?;
+        Ok(g.by_ctx.get(ctx).and_then(|idx| {
+            idx.iter().find_map(|&i| match &g.events[i].body {
+                EventBody::Authorized { mandate, .. } => Some(mandate.clone()),
+                _ => None,
+            })
+        }))
     }
 
     #[allow(clippy::too_many_lines)]
@@ -438,6 +456,9 @@ impl<S: Store + ?Sized> Store for std::sync::Arc<S> {
     }
     fn events(&self, ctx: &ContextId) -> Result<Vec<Event>, StoreError> {
         (**self).events(ctx)
+    }
+    fn authorized_mandate(&self, ctx: &ContextId) -> Result<Option<Mandate>, StoreError> {
+        (**self).authorized_mandate(ctx)
     }
     fn append(
         &self,

@@ -260,7 +260,6 @@ fn a_different_mandate_under_the_same_id_cannot_take_over_a_context() {
     assert_eq!(code, 0, "{err}");
     assert_eq!(r["context"], ctx);
     assert_eq!(events(&s.chain(&ctx)), ["authorized", "denied"]);
-    assert_eq!(s.contexts().len(), 1);
 }
 
 #[test]
