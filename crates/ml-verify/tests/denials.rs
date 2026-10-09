@@ -8,6 +8,7 @@ use common::*;
 use ml_adapters::{MockFinality, MockProof, MockRail};
 use ml_core::*;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 fn authorize_err(h: &Harness, m: &Mandate, c: &Cart) -> DenyReason {
     reason(&h.ledger.authorize(m, c, "k").unwrap_err())
@@ -155,8 +156,7 @@ fn forged_or_untrusted_mandates() {
     );
 
     // Valid signature, but from a key nobody trusts for this principal.
-    let attacker = SigningKey::from_bytes(&[42u8; 32]);
-    let forged = Mandate::sign(mandate().body, &attacker).unwrap();
+    let forged = Mandate::sign(mandate().body, &attacker_key()).unwrap();
     assert!(forged.verify().is_ok());
     assert_eq!(
         authorize_err(&h, &forged, &cart("bigbasket.com", "1")),
@@ -288,6 +288,73 @@ fn a10_the_payee_must_be_the_authorized_merchant() {
         4,
         "two refusals, one payment"
     );
+}
+
+#[test]
+fn a14_a_retry_must_present_the_mandate_the_context_was_authorized_under() {
+    let h = harness();
+    let m = mandate();
+    let c = cart("bigbasket.com", "100");
+    let a = h.ledger.authorize(&m, &c, "o1").unwrap();
+    let retry = |m: &Mandate| h.ledger.authorize(m, &c, "o1");
+    let events = || h.ledger.evidence(a.ctx()).unwrap().unwrap().events.len();
+
+    // The same mandate again is the same purchase attempt.
+    assert_eq!(retry(&m).unwrap().ctx(), a.ctx());
+
+    // The same body signed by someone else lands on the same context, since
+    // the id is what the context derives from — and is not handed its token.
+    let forged = Mandate::sign(m.body.clone(), &attacker_key()).unwrap();
+    assert_eq!(
+        reason(&retry(&forged).unwrap_err()),
+        DenyReason::ContextMismatch
+    );
+
+    // The same id and signer with a wider scope is not that purchase either.
+    let mut wider = scope();
+    wider.max_per_txn = None;
+    assert_eq!(
+        reason(&retry(&mandate_with("mnd-1", wider)).unwrap_err()),
+        DenyReason::ContextMismatch
+    );
+
+    // A bad signature is refused for what it is, not as a different mandate.
+    let mut corrupted = m.clone();
+    corrupted.signature[0] ^= 1;
+    assert_eq!(
+        reason(&retry(&corrupted).unwrap_err()),
+        DenyReason::MandateSignatureInvalid
+    );
+
+    // Every refusal is on the context's chain, nothing more was reserved,
+    // and the honest retry still answers.
+    assert_eq!(events(), 4);
+    assert_eq!(h.store.reserved(m.id()).unwrap(), Some(inr("100")));
+    assert_eq!(retry(&m).unwrap().ctx(), a.ctx());
+
+    // The same holds once the purchase has gone all the way through.
+    let p = h
+        .ledger
+        .record_payment(&a, &MockProof::bound_to(a.ctx(), "p", inr("100")))
+        .unwrap();
+    let Settlement::Settled(s) = h
+        .ledger
+        .record_settlement(&p, &MockFinality::confirmed("p", 1))
+        .unwrap()
+    else {
+        panic!("final at one confirmation")
+    };
+    let receipt = DeliveryReceipt {
+        reference: "r".into(),
+        attestation: Attestation::AgentReported,
+    };
+    h.ledger.record_delivery(&s, receipt).unwrap();
+    assert_eq!(
+        reason(&retry(&forged).unwrap_err()),
+        DenyReason::ContextMismatch
+    );
+    assert_eq!(retry(&m).unwrap().ctx(), a.ctx());
+    assert_eq!(events(), 8);
 }
 
 #[test]
@@ -433,4 +500,76 @@ fn a8_revocation_is_enforced_inside_append_not_only_before_it() {
         None,
         "nothing may be reserved under a revoked mandate"
     );
+}
+
+/// A store that, once, claims a context has no record although it does:
+/// the losing side of two concurrent first authorizations of the same
+/// purchase attempt, whose read ran before the winner's commit and whose
+/// append runs after it.
+struct ForgetsOnce {
+    inner: Arc<MemoryStore>,
+    forget: AtomicBool,
+}
+
+impl Store for ForgetsOnce {
+    fn record(&self, ctx: &ContextId) -> Result<Option<Record>, StoreError> {
+        if self.forget.swap(false, Ordering::SeqCst) {
+            return Ok(None);
+        }
+        self.inner.record(ctx)
+    }
+    fn events(&self, ctx: &ContextId) -> Result<Vec<Event>, StoreError> {
+        self.inner.events(ctx)
+    }
+    fn append(
+        &self,
+        ctx: &ContextId,
+        at: Timestamp,
+        body: EventBody,
+    ) -> Result<AppendOutcome, StoreError> {
+        self.inner.append(ctx, at, body)
+    }
+    fn events_after(&self, after: u64, limit: usize) -> Result<Vec<Event>, StoreError> {
+        self.inner.events_after(after, limit)
+    }
+    fn scan(&self, filter: &RecordFilter, limit: usize) -> Result<Vec<Record>, StoreError> {
+        self.inner.scan(filter, limit)
+    }
+    fn last_seq(&self) -> Result<u64, StoreError> {
+        self.inner.last_seq()
+    }
+    fn reserved(&self, mandate: &MandateId) -> Result<Option<Money>, StoreError> {
+        self.inner.reserved(mandate)
+    }
+    fn is_revoked(&self, mandate: &MandateId) -> Result<bool, StoreError> {
+        self.inner.is_revoked(mandate)
+    }
+    fn revoke(&self, mandate: &MandateId) -> Result<(), StoreError> {
+        self.inner.revoke(mandate)
+    }
+}
+
+#[test]
+fn a_retry_that_loses_the_race_with_the_first_authorization_is_still_a_retry() {
+    let store = Arc::new(ForgetsOnce {
+        inner: Arc::new(MemoryStore::new()),
+        forget: AtomicBool::new(false),
+    });
+    let signers = TrustedSigners::new().allow(principal(), user_key().verifying_key().to_bytes());
+    let ledger = Ledger::new(
+        Arc::clone(&store),
+        MockRail::new("mock", 1),
+        signers,
+        Arc::new(FixedClock::at(T0 + 60)),
+    );
+    let m = mandate();
+    let c = cart("bigbasket.com", "10");
+    let a = ledger.authorize(&m, &c, "k").unwrap();
+
+    // The retry reads no record, passes every check, and its append meets
+    // the winner's: the same token, nothing reserved twice, nothing added.
+    store.forget.store(true, Ordering::SeqCst);
+    assert_eq!(ledger.authorize(&m, &c, "k").unwrap().ctx(), a.ctx());
+    assert_eq!(store.inner.reserved(m.id()).unwrap(), Some(inr("10")));
+    assert_eq!(store.inner.events(a.ctx()).unwrap().len(), 1);
 }

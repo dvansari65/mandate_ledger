@@ -17,6 +17,14 @@ use serde::{Deserialize, Serialize};
 /// Bundle format version.
 pub const EVIDENCE_VERSION: u16 = 1;
 
+/// The mandate in the chain's `Authorized` event, if it has one.
+pub(crate) fn authorized_mandate(events: &[Event]) -> Option<&Mandate> {
+    events.iter().find_map(|e| match &e.body {
+        EventBody::Authorized { mandate, .. } => Some(mandate),
+        _ => None,
+    })
+}
+
 /// The full, ordered event chain for one context.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EvidenceBundle {
@@ -86,10 +94,7 @@ impl EvidenceBundle {
     /// The mandate the context was authorized under.
     #[must_use]
     pub fn mandate(&self) -> Option<&Mandate> {
-        self.events.iter().find_map(|e| match &e.body {
-            EventBody::Authorized { mandate, .. } => Some(mandate),
-            _ => None,
-        })
+        authorized_mandate(&self.events)
     }
 
     /// The cart as authorized.

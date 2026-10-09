@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# Threat model A1, A2 — double-charge on retry, nonce race (P3).
+# Threat model A1, A2 — double-charge on retry, nonce race (P3); A14 —
+# a retry under a forged mandate (P7, P15).
 #
-# One payment nonce, one payment. The same proof retried against the same
-# context is the same payment: the engine answers as it did and adds
-# nothing to the chain. That nonce presented for a second context, under
-# any reference, is refused and recorded against the second context, which
-# then pays with a nonce of its own.
+# A retry is the same purchase attempt, a forgery is not: the same request
+# key under a mandate with the same id but another signer lands on the
+# same context and is refused there. One payment nonce, one payment: the
+# same proof retried against the same context is the same payment, and the
+# engine answers as it did and adds nothing to the chain; that nonce
+# presented for a second context, under any reference, is refused and
+# recorded against the second context, which then pays with a nonce of its
+# own.
 
 # shellcheck source=lib.sh
 . "$(dirname "$0")/lib.sh"
@@ -18,6 +22,13 @@ nonce=$(ref nonce-ok)
 authorize "$mandate" "$cart" "order-a"
 expect_allowed "context A is authorized" state=authorized
 a=$(field .context)
+
+# The same request key under the same mandate body signed by a key of the
+# attacker's own: the same context, not its token.
+authorize "$(forge_mandate mandate)" "$cart" "order-a"
+expect_refused CONTEXT_MISMATCH true "A's request key under a forged mandate"
+authorize "$mandate" "$cart" "order-a"
+expect_allowed "the same mandate again is the same purchase attempt" context="$a"
 authorize "$mandate" "$cart" "order-b"
 expect_allowed "context B is authorized: same cart, its own request key" state=authorized
 b=$(field .context)
@@ -27,7 +38,7 @@ expect_allowed "A is paid" state=paid
 key=$(field .idempotency_key)
 step pay "$a" --reference "$nonce" --amount "10.00 INR"
 expect_allowed "the same proof again is the same payment" state=paid idempotency_key="$key"
-expect_chain "$a" "authorized paid"
+expect_chain "$a" "authorized denied:CONTEXT_MISMATCH paid"
 
 step pay "$b" --reference "$(ref other-ok)" --amount "10.00 INR" --nonce "$nonce"
 expect_refused NONCE_ALREADY_USED true "A's nonce under another reference, for B"
