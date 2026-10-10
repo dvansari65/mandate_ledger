@@ -204,6 +204,11 @@ says no before the engine can be asked, so there is no event to record. The
 report carries the engine's code for it (`INVALID_STATE`,
 `CONTEXT_NOT_FOUND`) and `recorded  false`.
 
+A context records at most 32 refusals. Past that, a refusal is still exit
+`2` with its code — the decision is the engine's — but the chain does not
+grow and the report says `recorded  false`. The audit trail is bounded, so
+nobody fills the database by being refused.
+
 ## Log and contexts
 
 ```bash
@@ -313,7 +318,7 @@ migrations, and never created by a command that only reads.
 ML_DATABASE_URL=postgres://localhost/mandate_ledger scenarios/run-all.sh
 ```
 
-[`scenarios/`](../scenarios/README.md) is the threat model, run: eight
+[`scenarios/`](../scenarios/README.md) is the threat model, run: nine
 scripts, one per row, each driving the commands above the way an attacker
 and then an honest party would — one process per step — and asserting the
 exit code, the refusal code in the report and in the chain, and that the

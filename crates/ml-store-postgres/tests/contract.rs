@@ -252,6 +252,52 @@ fn a_failed_settlement_releases_the_reservation() {
 }
 
 #[test]
+fn a_context_records_at_most_the_cap_of_refusals_whatever_the_interleaving() {
+    let f = pg_or_skip!("denial-cap");
+    let m = f.mandate();
+    let a = f.ledger().authorize(&m, &f.cart("5.00"), "o1").unwrap();
+
+    // Eight writers, eight refusals each: twice the cap between them.
+    let recorded: usize = thread::scope(|s| {
+        let handles: Vec<_> = (0..8)
+            .map(|t| {
+                let ledger = f.ledger();
+                let a = &a;
+                s.spawn(move || {
+                    (0..8)
+                        .filter(|i| {
+                            let bad = MockProof {
+                                valid: false,
+                                ..MockProof::bound_to(a.ctx(), format!("p{t}-{i}"), inr("5.00"))
+                            };
+                            let err = ledger.record_payment(a, &bad).unwrap_err();
+                            let denied = err.denied().expect("a refusal");
+                            assert_eq!(denied.reason, DenyReason::ProofInvalid);
+                            denied.recorded
+                        })
+                        .count()
+                })
+            })
+            .collect();
+        handles.into_iter().map(|j| j.join().unwrap()).sum()
+    });
+    assert_eq!(recorded, DENIAL_CAP as usize, "exactly the cap are written");
+    assert_eq!(
+        f.store.events(a.ctx()).unwrap().len(),
+        1 + DENIAL_CAP as usize
+    );
+
+    // The cap bounds refusals, not the purchase.
+    f.ledger()
+        .record_payment(&a, &MockProof::bound_to(a.ctx(), "good", inr("5.00")))
+        .unwrap();
+    assert_eq!(
+        f.store.events(a.ctx()).unwrap().len(),
+        2 + DENIAL_CAP as usize
+    );
+}
+
+#[test]
 fn denials_are_recorded_against_their_context() {
     let f = pg_or_skip!("denials");
     let m = f.mandate();

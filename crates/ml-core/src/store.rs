@@ -51,6 +51,13 @@ pub struct Record {
     pub receipt_reference: Option<String>,
 }
 
+/// How many `Denied` events one context's chain may hold. A refusal past
+/// the cap is still a refusal — the decision is the engine's — but it is
+/// not written, so a chain is a bounded record of what was tried and not
+/// a surface anyone who can name a context can grow without end. Enough
+/// for every honest retry schedule; small enough that a chain stays a page.
+pub const DENIAL_CAP: u32 = 32;
+
 /// What happened when the store tried to append an event.
 #[allow(clippy::large_enum_variant)] // `Appended` carries the event; the others are tiny.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -73,6 +80,9 @@ pub enum AppendOutcome {
     /// before appending as well, but only the store can decide it atomically
     /// with the reservation.
     MandateRevoked,
+    /// `Denied` not written: the context already holds [`DENIAL_CAP`]
+    /// refusals. The refusal stands; the chain does not grow.
+    DenialsCapped,
 }
 
 /// Which contexts [`Store::scan`] returns. Every field is optional; the
@@ -116,7 +126,9 @@ pub trait Store: Send + Sync {
     ///
     /// Must enforce [`PaymentState::can_transition_to`] and return
     /// [`StoreError::IllegalTransition`] otherwise. `Denied` events never
-    /// change state and may be appended to a context that does not exist.
+    /// change state and may be appended to a context that does not exist,
+    /// but at most [`DENIAL_CAP`] of them are written per context: past
+    /// that, return [`AppendOutcome::DenialsCapped`] and write nothing.
     fn append(
         &self,
         ctx: &ContextId,
@@ -347,7 +359,16 @@ impl Store for MemoryStore {
                 let r = r.ok_or_else(|| StoreError::Corrupt("no record".to_owned()))?;
                 release = Some((r.mandate_id.clone(), r.amount.clone()));
             }
-            EventBody::Denied { .. } => {}
+            EventBody::Denied { .. } => {
+                let denials = g.by_ctx.get(ctx).map_or(0, |idx| {
+                    idx.iter()
+                        .filter(|&&i| matches!(g.events[i].body, EventBody::Denied { .. }))
+                        .count()
+                });
+                if denials >= DENIAL_CAP as usize {
+                    return Ok(AppendOutcome::DenialsCapped);
+                }
+            }
         }
 
         let prev_hash = g

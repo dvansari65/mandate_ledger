@@ -1,6 +1,6 @@
 # Scenarios
 
-Eight scripts, one per row of [the threat model](../docs/threat-model.md),
+Nine scripts, one per row of [the threat model](../docs/threat-model.md),
 each driving the engine the way an attacker and then an honest party would:
 through `ml`, one process per step, against PostgreSQL. Every script
 asserts the exit code of every step, the refusal code in the report and in
@@ -29,6 +29,7 @@ nothing else is using.
 | `06-out-of-scope` | A7, A9 | Merchant, category, per-purchase cap, currency, a missing category, an unsigned cart: six codes, six chains of one event, nothing reserved. A cart signed under an unknown key is exit 1, not a decision. A cart inside the scope is authorized. |
 | `07-time-window` | A8 | With the clock frozen: `MANDATE_NOT_YET_VALID` before the window, `MANDATE_EXPIRED` after it, `VELOCITY_EXCEEDED` on the fourth purchase in an hour, allowed once the hour has passed. Every event carries the frozen instant. |
 | `08-settlement-failure` | A4, A10 | A payment dropped in a reorganization on the check that would have made it final, and one the rail declined: both `settlement_failed`, undeliverable, compensated; the failed reservation is spendable again. Finality from another rail: `RAIL_MISMATCH`, recorded. The rail's retried report answers as before. |
+| `09-refusal-flood` | B5 | Thirty-five invalid proofs against one context: every one refused `PROOF_INVALID`, the first 32 recorded and the rest `recorded false`; the chain holds exactly 32 refusals; the honest proof still pays and settles; the bounded chain verifies. |
 
 ## Writing one
 

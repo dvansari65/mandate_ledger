@@ -209,9 +209,9 @@ where
                 DenyReason::MandateRevoked,
                 format!("mandate {} is revoked", mandate.id()),
             ),
-            AppendOutcome::NonceAlreadyUsed => {
-                Err(StoreError::Corrupt("nonce outcome returned for Authorized".to_owned()).into())
-            }
+            AppendOutcome::NonceAlreadyUsed | AppendOutcome::DenialsCapped => Err(
+                StoreError::Corrupt("refusal outcome returned for Authorized".to_owned()).into(),
+            ),
         }
     }
 
@@ -348,9 +348,11 @@ where
             ),
             AppendOutcome::BudgetExceeded { .. }
             | AppendOutcome::VelocityExceeded { .. }
-            | AppendOutcome::MandateRevoked => {
-                Err(StoreError::Corrupt("authorize outcome returned for Paid".to_owned()).into())
-            }
+            | AppendOutcome::MandateRevoked
+            | AppendOutcome::DenialsCapped => Err(StoreError::Corrupt(
+                "another body's outcome returned for Paid".to_owned(),
+            )
+            .into()),
         }
     }
 
@@ -736,6 +738,10 @@ where
 
     // ─────────────────────────────── helpers ─────────────────────────────
 
+    /// Refuse: write the refusal to the context's chain, unless the chain
+    /// already holds [`DENIAL_CAP`](crate::store::DENIAL_CAP) of them, and
+    /// return it. The decision is the same either way; only `recorded`
+    /// says whether the chain grew.
     fn deny<T>(
         &self,
         ctx: &ContextId,
@@ -744,20 +750,26 @@ where
         reason: DenyReason,
         detail: String,
     ) -> Result<T, LedgerError> {
-        self.store.append(
-            ctx,
-            now,
-            EventBody::Denied {
-                stage,
-                reason,
-                detail: detail.clone(),
-            },
-        )?;
+        let body = EventBody::Denied {
+            stage,
+            reason,
+            detail: detail.clone(),
+        };
+        let recorded = match self.store.append(ctx, now, body)? {
+            AppendOutcome::Appended(_) => true,
+            AppendOutcome::DenialsCapped => false,
+            other => {
+                return Err(
+                    StoreError::Corrupt(format!("unexpected append outcome {other:?}")).into(),
+                );
+            }
+        };
         Err(Denied {
             ctx: ctx.clone(),
             stage,
             reason,
             detail,
+            recorded,
         }
         .into())
     }

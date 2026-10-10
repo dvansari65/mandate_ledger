@@ -31,6 +31,7 @@ Properties P1–P18 are from "A Formal Analysis of Agent Payment Protocols" (arX
 | B2 | Refund abuse at machine speed          | refunds are transitions; scope + velocity apply |
 | B3 | Prompt-injection overspend             | effect blocked by scope/budget; injection itself not detected |
 | B4 | Card testing via agents                | admission control + velocity only |
+| B5 | Refusal flooding of one context        | at most 32 `Denied` events per context, counted inside the store's append under the context lock; later refusals still refuse (`recorded: false`), the chain does not grow. Flooding *new* contexts is admission control's problem |
 
 ## C — Out of scope (by design)
 
