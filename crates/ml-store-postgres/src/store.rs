@@ -5,8 +5,8 @@ use crate::convert::{
     record_from_row, state_to_sql,
 };
 use ml_core::{
-    AppendOutcome, ContextId, Event, EventBody, Hash32, Mandate, MandateId, Money, PaymentState,
-    Record, RecordFilter, Store, StoreError, Timestamp,
+    AppendOutcome, ContextId, DENIAL_CAP, Event, EventBody, Hash32, Mandate, MandateId, Money,
+    PaymentState, Record, RecordFilter, Store, StoreError, Timestamp,
 };
 use postgres::{Config, GenericClient, NoTls};
 use r2d2::Pool;
@@ -409,7 +409,22 @@ impl Store for PostgresStore {
                     .ok_or_else(|| StoreError::Corrupt("no record".to_owned()))?;
                 fx.release = Some((r.mandate_id.clone(), r.amount.clone()));
             }
-            EventBody::Denied { .. } => {}
+            EventBody::Denied { .. } => {
+                // Under the context lock, so two refusals at the cap cannot
+                // both be written.
+                let denials: i64 = tx
+                    .query_one(
+                        "SELECT count(*) FROM ml_events \
+                         WHERE ctx = $1 AND body->>'type' = 'denied'",
+                        &[&ctx.as_str()],
+                    )
+                    .map_err(pg)?
+                    .try_get(0)
+                    .map_err(pg)?;
+                if denials >= i64::from(DENIAL_CAP) {
+                    return Ok(AppendOutcome::DenialsCapped);
+                }
+            }
         }
 
         // From here to commit, appends across every context run one at a

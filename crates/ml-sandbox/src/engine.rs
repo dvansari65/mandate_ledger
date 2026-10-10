@@ -198,8 +198,9 @@ pub fn ledger(db: &DbArgs, trust: &TrustArgs, rail: &RailArgs) -> Result<Engine,
 }
 
 /// What an engine error means to the shell. A refusal is a report — the
-/// ledger decided, and wrote the decision down — and exits 2. Anything else
-/// means it could not decide: exit 1, and the message says why.
+/// ledger decided, and wrote the decision down unless the context's chain
+/// already holds its cap of refusals — and exits 2. Anything else means it
+/// could not decide: exit 1, and the message says why.
 pub fn outcome(err: &LedgerError) -> Result<Report, Failure> {
     match err.denied() {
         Some(Denied {
@@ -207,12 +208,13 @@ pub fn outcome(err: &LedgerError) -> Result<Report, Failure> {
             stage,
             reason,
             detail,
+            recorded,
         }) => Ok(Report::refused()
             .with("context", ctx.as_str())
             .with("stage", stage.to_string())
             .with("refused", reason.code())
             .with("detail", detail.as_str())
-            .with("recorded", true)),
+            .with("recorded", *recorded)),
         None => Err(Failure::undecided(err.to_string())),
     }
 }

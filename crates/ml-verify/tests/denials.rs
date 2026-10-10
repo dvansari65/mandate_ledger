@@ -437,6 +437,39 @@ fn denials_are_recorded_as_evidence() {
     ));
 }
 
+#[test]
+fn b5_a_context_records_at_most_the_cap_of_refusals() {
+    let h = harness();
+    let a = h
+        .ledger
+        .authorize(&mandate(), &cart("bigbasket.com", "10"), "o1")
+        .unwrap();
+    let bad = MockProof {
+        valid: false,
+        ..MockProof::bound_to(a.ctx(), "p", inr("10"))
+    };
+
+    // Every one is refused; only the first `DENIAL_CAP` are written.
+    for n in 1..=DENIAL_CAP + 3 {
+        let err = h.ledger.record_payment(&a, &bad).unwrap_err();
+        let denied = err.denied().expect("a refusal");
+        assert_eq!(denied.reason, DenyReason::ProofInvalid, "refusal {n}");
+        assert_eq!(denied.recorded, n <= DENIAL_CAP, "refusal {n}");
+    }
+    assert_eq!(
+        h.store.events(a.ctx()).unwrap().len(),
+        1 + DENIAL_CAP as usize
+    );
+
+    // The cap bounds refusals, not the purchase; the bounded chain verifies.
+    h.ledger
+        .record_payment(&a, &MockProof::bound_to(a.ctx(), "p", inr("10")))
+        .unwrap();
+    let bundle = h.ledger.evidence(a.ctx()).unwrap().unwrap();
+    bundle.verify().unwrap();
+    assert_eq!(bundle.events.len(), 2 + DENIAL_CAP as usize);
+}
+
 /// A store whose `is_revoked` never says yes. It disarms the engine's early
 /// check, which is what a `revoke` landing between that check and the append
 /// does in production — leaving only whatever the store enforces inside

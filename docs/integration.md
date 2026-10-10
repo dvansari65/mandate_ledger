@@ -115,6 +115,10 @@ match err {
 }
 ```
 
+`d.recorded` says whether the refusal was written to the context's chain.
+It is false once a context holds 32 refusals; the decision is the same
+either way, only the audit trail stops growing.
+
 ## Writing a `Rail`
 
 ```rust

@@ -26,8 +26,9 @@
 //! 1. **Types** — `record_delivery` takes a [`Settled`]; there is no way to
 //!    construct one except from the engine.
 //! 2. **Engine** — every method re-reads the stored state before acting.
-//! 3. **Store** — [`Store::append`] enforces [`PaymentState::can_transition_to`]
-//!    and applies budget / velocity / nonce effects atomically.
+//! 3. **Store** — [`Store::append`] enforces [`PaymentState::can_transition_to`],
+//!    applies budget / velocity / nonce effects atomically, and writes at
+//!    most [`DENIAL_CAP`] refusals per context.
 //!
 //! ## What this crate does not do
 //!
@@ -72,7 +73,7 @@ pub use state::{
     Authorized, Compensated, Delivered, Paid, PaymentState, Reached, Resumed, Settled, Settlement,
     SettlementFailed,
 };
-pub use store::{AppendOutcome, MemoryStore, Record, RecordFilter, Store};
+pub use store::{AppendOutcome, DENIAL_CAP, MemoryStore, Record, RecordFilter, Store};
 pub use time::{Clock, FixedClock, SystemClock, Timestamp};
 
 /// Re-exported so hosts don't need a direct `ed25519-dalek` dependency to sign mandates.

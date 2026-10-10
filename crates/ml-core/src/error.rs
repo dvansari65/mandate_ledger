@@ -113,11 +113,13 @@ impl<'de> Deserialize<'de> for DenyReason {
     }
 }
 
-/// A refused step. Always recorded in the ledger before being returned.
+/// A refused step. Written to the context's chain before being returned,
+/// until the chain holds [`DENIAL_CAP`](crate::store::DENIAL_CAP) refusals;
+/// past that the decision stands and the record does not grow.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
 #[error("{stage} denied: {reason} — {detail}")]
 pub struct Denied {
-    /// The context the denial was recorded under.
+    /// The context the denial was decided under.
     pub ctx: ContextId,
     /// Which step refused.
     pub stage: Stage,
@@ -125,6 +127,13 @@ pub struct Denied {
     pub reason: DenyReason,
     /// Human-readable detail. Never contains secrets.
     pub detail: String,
+    /// Whether this refusal was written to the chain.
+    #[serde(default = "recorded_by_default")]
+    pub recorded: bool,
+}
+
+fn recorded_by_default() -> bool {
+    true
 }
 
 /// Any error from a ledger operation.
