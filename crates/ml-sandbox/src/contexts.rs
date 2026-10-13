@@ -22,6 +22,11 @@ pub struct Cmd {
     )]
     state: Option<PaymentState>,
 
+    /// Start just after this context id. The report's `next` is the last id
+    /// listed: pass it back to read the contexts after it.
+    #[arg(long, value_name = "CTX")]
+    after: Option<String>,
+
     /// At most this many contexts, in byte order of their ids.
     #[arg(long, default_value_t = 50, value_name = "N")]
     limit: usize,
@@ -52,10 +57,16 @@ pub fn run(cmd: &Cmd) -> Result<Report, Failure> {
             .map_err(|e| Failure::undecided(format!("--mandate: {e}")))?,
         state: cmd.state,
     };
+    let after = cmd.after.as_deref().map(engine::context).transpose()?;
     let records = engine::store(&cmd.db)?
-        .scan(&filter, cmd.limit)
+        .scan(&filter, after.as_ref(), cmd.limit)
         .map_err(|e| Failure::undecided(e.to_string()))?;
-    Ok(Report::new().table("contexts", COLUMNS, records.iter().map(row).collect()))
+    // The cursor for the page after this one: the last id listed, or the
+    // one given when nothing was.
+    let next = records.last().map(|r| r.ctx.clone()).or(after);
+    Ok(Report::new()
+        .with("next", next.map(|ctx| ctx.as_str().to_owned()))
+        .table("contexts", COLUMNS, records.iter().map(row).collect()))
 }
 
 fn row(record: &Record) -> Vec<Value> {

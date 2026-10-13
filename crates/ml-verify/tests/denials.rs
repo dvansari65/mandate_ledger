@@ -494,8 +494,13 @@ impl Store for BlindToRevocation {
     fn events_after(&self, after: u64, limit: usize) -> Result<Vec<Event>, StoreError> {
         self.0.events_after(after, limit)
     }
-    fn scan(&self, filter: &RecordFilter, limit: usize) -> Result<Vec<Record>, StoreError> {
-        self.0.scan(filter, limit)
+    fn scan(
+        &self,
+        filter: &RecordFilter,
+        after: Option<&ContextId>,
+        limit: usize,
+    ) -> Result<Vec<Record>, StoreError> {
+        self.0.scan(filter, after, limit)
     }
     fn last_seq(&self) -> Result<u64, StoreError> {
         self.0.last_seq()
@@ -565,8 +570,13 @@ impl Store for ForgetsOnce {
     fn events_after(&self, after: u64, limit: usize) -> Result<Vec<Event>, StoreError> {
         self.inner.events_after(after, limit)
     }
-    fn scan(&self, filter: &RecordFilter, limit: usize) -> Result<Vec<Record>, StoreError> {
-        self.inner.scan(filter, limit)
+    fn scan(
+        &self,
+        filter: &RecordFilter,
+        after: Option<&ContextId>,
+        limit: usize,
+    ) -> Result<Vec<Record>, StoreError> {
+        self.inner.scan(filter, after, limit)
     }
     fn last_seq(&self) -> Result<u64, StoreError> {
         self.inner.last_seq()

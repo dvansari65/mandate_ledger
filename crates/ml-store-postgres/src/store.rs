@@ -612,18 +612,26 @@ impl Store for PostgresStore {
             .collect()
     }
 
-    fn scan(&self, filter: &RecordFilter, limit: usize) -> Result<Vec<Record>, StoreError> {
+    fn scan(
+        &self,
+        filter: &RecordFilter,
+        after: Option<&ContextId>,
+        limit: usize,
+    ) -> Result<Vec<Record>, StoreError> {
         let mut conn = self.pool.get().map_err(backend)?;
-        // Ordered byte-wise, so contexts come back in exactly the order the
-        // in-memory store lists them, whatever the database's locale.
+        // Ordered and paged byte-wise, so contexts come back in exactly the
+        // order the in-memory store lists them, whatever the database's
+        // locale.
         let sql = format!(
             "SELECT {RECORD_COLUMNS} FROM ml_contexts \
              WHERE ($1::text IS NULL OR mandate_id = $1) AND ($2::text IS NULL OR state = $2) \
-             ORDER BY ctx COLLATE \"C\" LIMIT $3"
+             AND ($3::text IS NULL OR ctx COLLATE \"C\" > $3) \
+             ORDER BY ctx COLLATE \"C\" LIMIT $4"
         );
         let mandate = filter.mandate.as_ref().map(MandateId::as_str);
         let state = filter.state.map(state_to_sql);
-        conn.query(&sql, &[&mandate, &state, &bigint(limit)])
+        let after = after.map(ContextId::as_str);
+        conn.query(&sql, &[&mandate, &state, &after, &bigint(limit)])
             .map_err(pg)?
             .iter()
             .map(record_from_row)

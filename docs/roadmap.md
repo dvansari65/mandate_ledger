@@ -22,7 +22,7 @@ mandate, the cart, the proof and the finality disagree, and records why.
 - [x] B6: cap `Denied` events per context, live ones included — a retry
       under a forged mandate lands on the chain it names (the audit path is
       a storage DoS)
-- [ ] Keyset paging for `scan`; `MemoryStore` pruning; the test suite's
+- [x] Keyset paging for `scan`; `MemoryStore` pruning; the test suite's
       connection budget
 
 ### 3. Hygiene

@@ -145,10 +145,17 @@ pub trait Store: Send + Sync {
     /// came next, and nothing is skipped.
     fn events_after(&self, after: u64, limit: usize) -> Result<Vec<Event>, StoreError>;
 
-    /// The current record of every context matching `filter`, ordered by
-    /// context id (byte-wise), at most `limit` of them. A context that has
-    /// only ever been refused has no record; its refusals are in the log.
-    fn scan(&self, filter: &RecordFilter, limit: usize) -> Result<Vec<Record>, StoreError>;
+    /// The current record of every context matching `filter` whose id is
+    /// after `after` (byte-wise), ordered by id, at most `limit` of them.
+    /// The last id a reader saw is its cursor, as `seq` is for
+    /// [`Store::events_after`]. A context that has only ever been refused
+    /// has no record; its refusals are in the log.
+    fn scan(
+        &self,
+        filter: &RecordFilter,
+        after: Option<&ContextId>,
+        limit: usize,
+    ) -> Result<Vec<Record>, StoreError>;
 
     /// The highest sequence number in the log, or 0 when it is empty. This is
     /// how a reader finds the tail: `events_after(last_seq - n, n)` is the
@@ -173,6 +180,9 @@ struct Inner {
     records: HashMap<ContextId, Record>,
     events: Vec<Event>,
     by_ctx: HashMap<ContextId, Vec<usize>>,
+    /// The highest sequence number handed out. Kept apart from `events`,
+    /// which pruning shortens: a sequence number is never reused.
+    last_seq: u64,
     reserved: HashMap<MandateId, Money>,
     auth_times: HashMap<MandateId, Vec<Timestamp>>,
     nonces: HashMap<(String, String), ContextId>,
@@ -195,6 +205,47 @@ impl MemoryStore {
     /// Every event in the store, in global order. For inspection and tests.
     pub fn all_events(&self) -> Result<Vec<Event>, StoreError> {
         Ok(self.lock()?.events.clone())
+    }
+
+    /// Retention, by hand: forget what `before` has made irrelevant.
+    /// Velocity history older than `before` goes, and so do the chains and
+    /// records of contexts that were finished — delivered, compensated,
+    /// expired, or only ever refused — before it. Nonces stay, a spent
+    /// nonce being spent forever, as do live reservations and revocations.
+    /// Sequence numbers carry on from where they were, so a reader's cursor
+    /// survives. Export the evidence you still need first: a pruned chain is
+    /// gone. Prune no closer than the longest velocity window you issue, or
+    /// a window will undercount.
+    pub fn prune(&self, before: Timestamp) -> Result<(), StoreError> {
+        let mut g = self.lock()?;
+        let inner = &mut *g;
+        for times in inner.auth_times.values_mut() {
+            times.retain(|t| *t >= before);
+        }
+        inner.auth_times.retain(|_, times| !times.is_empty());
+
+        let gone: HashSet<ContextId> = inner
+            .by_ctx
+            .iter()
+            .filter(|(ctx, idx)| {
+                let finished = inner
+                    .records
+                    .get(*ctx)
+                    .is_none_or(|r| r.state.is_terminal());
+                finished && idx.last().is_some_and(|&i| inner.events[i].at < before)
+            })
+            .map(|(ctx, _)| ctx.clone())
+            .collect();
+        if gone.is_empty() {
+            return Ok(());
+        }
+        inner.records.retain(|ctx, _| !gone.contains(ctx));
+        inner.events.retain(|e| !gone.contains(&e.ctx));
+        inner.by_ctx.clear();
+        for (i, e) in inner.events.iter().enumerate() {
+            inner.by_ctx.entry(e.ctx.clone()).or_default().push(i);
+        }
+        Ok(())
     }
 
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, Inner>, StoreError> {
@@ -376,7 +427,7 @@ impl Store for MemoryStore {
             .get(ctx)
             .and_then(|idx| idx.last())
             .map_or(Hash32::ZERO, |&i| g.events[i].hash);
-        let seq = g.events.len() as u64 + 1;
+        let seq = g.last_seq + 1;
         let event = Event::new(prev_hash, seq, ctx.clone(), at, body)?;
 
         // ── Phase 2: commit. ──
@@ -424,6 +475,7 @@ impl Store for MemoryStore {
             }
         }
 
+        g.last_seq = seq;
         let index = g.events.len();
         g.events.push(event.clone());
         g.by_ctx.entry(ctx.clone()).or_default().push(index);
@@ -440,12 +492,17 @@ impl Store for MemoryStore {
             .collect())
     }
 
-    fn scan(&self, filter: &RecordFilter, limit: usize) -> Result<Vec<Record>, StoreError> {
+    fn scan(
+        &self,
+        filter: &RecordFilter,
+        after: Option<&ContextId>,
+        limit: usize,
+    ) -> Result<Vec<Record>, StoreError> {
         let g = self.lock()?;
         let mut hits: Vec<Record> = g
             .records
             .values()
-            .filter(|r| filter.matches(r))
+            .filter(|r| filter.matches(r) && after.is_none_or(|a| r.ctx > *a))
             .cloned()
             .collect();
         hits.sort_by(|a, b| a.ctx.cmp(&b.ctx));
@@ -454,7 +511,7 @@ impl Store for MemoryStore {
     }
 
     fn last_seq(&self) -> Result<u64, StoreError> {
-        Ok(self.lock()?.events.last().map_or(0, |e| e.seq))
+        Ok(self.lock()?.last_seq)
     }
 
     fn reserved(&self, mandate: &MandateId) -> Result<Option<Money>, StoreError> {
@@ -492,8 +549,13 @@ impl<S: Store + ?Sized> Store for std::sync::Arc<S> {
     fn events_after(&self, after: u64, limit: usize) -> Result<Vec<Event>, StoreError> {
         (**self).events_after(after, limit)
     }
-    fn scan(&self, filter: &RecordFilter, limit: usize) -> Result<Vec<Record>, StoreError> {
-        (**self).scan(filter, limit)
+    fn scan(
+        &self,
+        filter: &RecordFilter,
+        after: Option<&ContextId>,
+        limit: usize,
+    ) -> Result<Vec<Record>, StoreError> {
+        (**self).scan(filter, after, limit)
     }
     fn last_seq(&self) -> Result<u64, StoreError> {
         (**self).last_seq()

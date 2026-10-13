@@ -4,7 +4,7 @@
 mod common;
 
 use common::*;
-use ml_adapters::MockProof;
+use ml_adapters::{MockFinality, MockProof};
 use ml_core::*;
 
 #[test]
@@ -81,21 +81,26 @@ fn scan_filters_by_mandate_and_state_in_byte_order() {
     };
 
     let everything = sorted(vec![a.ctx().clone(), b.ctx().clone(), c.ctx().clone()]);
-    assert_eq!(
-        ids(h.store.scan(&RecordFilter::default(), 10).unwrap()),
-        everything
-    );
-    assert_eq!(
-        ids(h.store.scan(&RecordFilter::default(), 2).unwrap()),
-        &everything[..2]
-    );
+    let all = RecordFilter::default();
+    assert_eq!(ids(h.store.scan(&all, None, 10).unwrap()), everything);
+    assert_eq!(ids(h.store.scan(&all, None, 2).unwrap()), &everything[..2]);
+
+    // Keyset paging: the last id seen is the cursor, and a page of one
+    // walks the same order as a page of everything.
+    let mut walked = Vec::new();
+    let mut cursor = None;
+    while let Some(record) = h.store.scan(&all, cursor.as_ref(), 1).unwrap().pop() {
+        walked.push(record.ctx.clone());
+        cursor = Some(record.ctx);
+    }
+    assert_eq!(walked, everything);
 
     let under_m1 = RecordFilter {
         mandate: Some(m1.id().clone()),
         ..RecordFilter::default()
     };
     assert_eq!(
-        ids(h.store.scan(&under_m1, 10).unwrap()),
+        ids(h.store.scan(&under_m1, None, 10).unwrap()),
         sorted(vec![a.ctx().clone(), b.ctx().clone()])
     );
 
@@ -103,11 +108,108 @@ fn scan_filters_by_mandate_and_state_in_byte_order() {
         state: Some(PaymentState::Paid),
         ..RecordFilter::default()
     };
-    assert_eq!(ids(h.store.scan(&paid, 10).unwrap()), [a.ctx().clone()]);
+    assert_eq!(
+        ids(h.store.scan(&paid, None, 10).unwrap()),
+        [a.ctx().clone()]
+    );
 
     let paid_under_m2 = RecordFilter {
         mandate: Some(m2.id().clone()),
         state: Some(PaymentState::Paid),
     };
-    assert_eq!(h.store.scan(&paid_under_m2, 10).unwrap(), []);
+    assert_eq!(h.store.scan(&paid_under_m2, None, 10).unwrap(), []);
+}
+
+#[test]
+fn prune_forgets_finished_chains_and_old_history_but_never_a_nonce() {
+    let h = harness();
+    let m = mandate_with(
+        "mnd-1",
+        Scope {
+            velocity: Some(Velocity {
+                max_count: 2,
+                window_secs: 100,
+            }),
+            ..scope()
+        },
+    );
+    let done = h
+        .ledger
+        .authorize(&m, &cart("bigbasket.com", "10"), "done")
+        .unwrap();
+    let live = h
+        .ledger
+        .authorize(&m, &cart("bigbasket.com", "20"), "live")
+        .unwrap();
+    let paid = h
+        .ledger
+        .record_payment(&done, &MockProof::bound_to(done.ctx(), "spent", inr("10")))
+        .unwrap();
+    let Settlement::Settled(settled) = h
+        .ledger
+        .record_settlement(&paid, &MockFinality::confirmed("spent", 1))
+        .unwrap()
+    else {
+        panic!("final at one confirmation")
+    };
+    let receipt = DeliveryReceipt {
+        reference: "r".into(),
+        attestation: Attestation::AgentReported,
+    };
+    h.ledger.record_delivery(&settled, receipt).unwrap();
+
+    // The window is full now. Later, with the history older than the
+    // window pruned, it is empty — exactly as it would be with the history
+    // kept.
+    let third = cart("bigbasket.com", "30");
+    assert_eq!(
+        reason(&h.ledger.authorize(&m, &third, "third").unwrap_err()),
+        DenyReason::VelocityExceeded
+    );
+    let last = h.store.last_seq().unwrap();
+    h.clock.set(T0 + 60 + 200);
+    h.store.prune(Timestamp(T0 + 60 + 100)).unwrap();
+
+    // The delivered chain and the refused one are gone; the live one stays.
+    assert_eq!(h.store.record(done.ctx()).unwrap(), None);
+    assert_eq!(h.store.events(done.ctx()).unwrap(), []);
+    assert_eq!(h.ledger.evidence(done.ctx()).unwrap(), None);
+    assert_eq!(
+        h.store.record(live.ctx()).unwrap().map(|r| r.state),
+        Some(PaymentState::Authorized)
+    );
+    assert_eq!(h.store.events(live.ctx()).unwrap().len(), 1);
+    assert_eq!(
+        h.store
+            .scan(&RecordFilter::default(), None, 10)
+            .unwrap()
+            .into_iter()
+            .map(|r| r.ctx)
+            .collect::<Vec<_>>(),
+        [live.ctx().clone()]
+    );
+
+    // A nonce spent on a pruned chain is spent forever.
+    assert_eq!(
+        reason(
+            &h.ledger
+                .record_payment(&live, &MockProof::bound_to(live.ctx(), "spent", inr("20")))
+                .unwrap_err()
+        ),
+        DenyReason::NonceAlreadyUsed
+    );
+
+    // Sequence numbers carry on from where they were, so a cursor survives:
+    // that refusal and this authorization are the next two.
+    h.ledger.authorize(&m, &third, "third").unwrap();
+    assert_eq!(
+        h.store
+            .events_after(last, 10)
+            .unwrap()
+            .iter()
+            .map(|e| e.seq)
+            .collect::<Vec<_>>(),
+        [last + 1, last + 2]
+    );
+    assert_eq!(h.store.last_seq().unwrap(), last + 2);
 }
