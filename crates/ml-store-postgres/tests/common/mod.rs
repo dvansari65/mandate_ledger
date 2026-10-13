@@ -87,9 +87,28 @@ fn run_id() -> &'static str {
     })
 }
 
+/// A store over a small pool that connects on demand. The suite runs its
+/// tests in parallel, each over a store of its own, and
+/// `PostgresStore::connect` opens ten connections per store up front: a
+/// dozen tests at once would sit at the server's default limit of a
+/// hundred. Eight, opened as needed, costs nothing while a test is idle.
+/// The widest race here spawns sixteen threads; the extra eight queue on
+/// the pool, which is the point — they contend over the ledger's locks,
+/// not over the server's connection slots.
+fn store(url: &str) -> ml_store_postgres::PostgresStore {
+    let config: postgres::Config = url.parse().expect("database url");
+    let manager = r2d2_postgres::PostgresConnectionManager::new(config, postgres::NoTls);
+    let pool = r2d2::Pool::builder()
+        .max_size(8)
+        .min_idle(Some(0))
+        .build(manager)
+        .expect("pool");
+    ml_store_postgres::PostgresStore::from_pool(pool)
+}
+
 /// Connect, migrate, and namespace everything under `tag`.
 pub fn fixture(tag: &str) -> Option<Fixture> {
-    let store = ml_store_postgres::PostgresStore::connect(&url()?).expect("connect");
+    let store = store(&url()?);
     store.migrate().expect("migrate");
     Some(Fixture {
         store: Arc::new(store),
@@ -101,8 +120,7 @@ pub fn fixture(tag: &str) -> Option<Fixture> {
 impl Fixture {
     /// A second store over the same database — what a restarted process sees.
     pub fn reconnect(&self) -> Arc<ml_store_postgres::PostgresStore> {
-        let store = ml_store_postgres::PostgresStore::connect(&url().unwrap()).expect("reconnect");
-        Arc::new(store)
+        Arc::new(store(&url().unwrap()))
     }
 
     pub fn principal(&self) -> PrincipalId {

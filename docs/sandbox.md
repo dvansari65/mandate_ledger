@@ -217,6 +217,7 @@ ml log --after 120 --limit 20 # page forward; the report's `next` is the cursor
 ml log --limit 0              # nothing but `next`: where the log ends now
 ml log --context ctx_…        # one context's chain, oldest first
 ml contexts --mandate mnd-1 --state authorized
+ml contexts --after ctx_… --limit 20   # page forward; `next` is the cursor
 ```
 
 `ml log` is every event in every context, refusals included, in the order
@@ -224,8 +225,10 @@ the store committed them. Each row carries `seq`, `at`, `context`, `event`,
 `code` — the refusal code for a `denied` event, empty otherwise — and
 `detail`. A script that wants everything from a point in time takes `next`
 from `ml log --limit 0` and passes it to `--after` later. `ml contexts` is
-where each context stands now: a context that has only ever been refused has
-no record — its refusals are in the log.
+where each context stands now, in byte order of their ids, and pages the
+same way: `next` is the last id listed, and `--after` reads on from it. A
+context that has only ever been refused has no record — its refusals are in
+the log.
 
 ## Evidence
 

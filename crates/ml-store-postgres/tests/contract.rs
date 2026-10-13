@@ -397,8 +397,13 @@ impl Store for BlindToRevocation {
     fn events_after(&self, after: u64, limit: usize) -> Result<Vec<Event>, StoreError> {
         self.0.events_after(after, limit)
     }
-    fn scan(&self, filter: &RecordFilter, limit: usize) -> Result<Vec<Record>, StoreError> {
-        self.0.scan(filter, limit)
+    fn scan(
+        &self,
+        filter: &RecordFilter,
+        after: Option<&ContextId>,
+        limit: usize,
+    ) -> Result<Vec<Record>, StoreError> {
+        self.0.scan(filter, after, limit)
     }
     fn last_seq(&self) -> Result<u64, StoreError> {
         self.0.last_seq()
@@ -515,15 +520,29 @@ fn scan_filters_by_mandate_and_state_in_byte_order() {
     all.extend(crafted);
     all.sort();
 
-    assert_eq!(ids(f.store.scan(&under(None), 10).unwrap()), all);
-    assert_eq!(ids(f.store.scan(&under(None), 1).unwrap()), &all[..1]);
+    assert_eq!(ids(f.store.scan(&under(None), None, 10).unwrap()), all);
+    assert_eq!(ids(f.store.scan(&under(None), None, 1).unwrap()), &all[..1]);
+    // Keyset paging: the last id seen is the cursor, in the same byte order.
     assert_eq!(
-        ids(f.store.scan(&under(Some(PaymentState::Paid)), 10).unwrap()),
+        ids(f.store.scan(&under(None), Some(&all[0]), 10).unwrap()),
+        &all[1..]
+    );
+    assert_eq!(
+        f.store
+            .scan(&under(None), Some(all.last().unwrap()), 10)
+            .unwrap(),
+        []
+    );
+    assert_eq!(
+        ids(f
+            .store
+            .scan(&under(Some(PaymentState::Paid)), None, 10)
+            .unwrap()),
         [a.ctx().clone()]
     );
     assert_eq!(
         f.store
-            .scan(&under(Some(PaymentState::Delivered)), 10)
+            .scan(&under(Some(PaymentState::Delivered)), None, 10)
             .unwrap(),
         []
     );

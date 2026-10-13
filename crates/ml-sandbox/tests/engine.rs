@@ -234,6 +234,47 @@ fn authorize_then_read_it_back_from_fresh_processes() {
 }
 
 #[test]
+fn contexts_page_by_id_with_next_as_the_cursor() {
+    let Some(url) = database() else { return };
+    let s = Setup::new("contexts-page", url);
+    let mut ids = vec![
+        s.authorized(&s.cart("one", "10.00"), "order-1"),
+        s.authorized(&s.cart("two", "20.00"), "order-2"),
+        s.authorized(&s.cart("three", "30.00"), "order-3"),
+    ];
+    ids.sort(); // byte order, as the store lists them
+
+    // A page of one at a time walks every context in order. `next` is the
+    // last id listed, and once nothing is left it is the cursor given.
+    let mut walked = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let mut args = vec!["contexts", "--mandate", &s.mandate_id, "--limit", "1"];
+        if let Some(after) = &cursor {
+            args.extend(["--after", after]);
+        }
+        let (code, report, err) = s.step(&args);
+        assert_eq!(code, 0, "{err}");
+        let page = report["contexts"].as_array().unwrap();
+        if page.is_empty() {
+            assert_eq!(report["next"].as_str(), cursor.as_deref());
+            break;
+        }
+        assert_eq!(page.len(), 1);
+        let ctx = page[0]["context"].as_str().unwrap().to_owned();
+        assert_eq!(report["next"], ctx);
+        walked.push(ctx.clone());
+        cursor = Some(ctx);
+    }
+    assert_eq!(walked, ids);
+
+    // A cursor that is not a context id is refused before the database.
+    let (code, _, err) = s.step(&["contexts", "--after", ""]);
+    assert_eq!(code, 1, "{err}");
+    assert!(err.contains("--after"), "{err}");
+}
+
+#[test]
 fn a_different_mandate_under_the_same_id_cannot_take_over_a_context() {
     let Some(url) = database() else { return };
     let s = Setup::new("takeover", url);
