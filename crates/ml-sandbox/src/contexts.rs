@@ -4,7 +4,7 @@ use crate::Failure;
 use crate::engine::{self, DbArgs};
 use crate::report::Report;
 use clap::Args;
-use ml_core::{MandateId, PaymentState, Record, RecordFilter, Store as _};
+use ml_core::{ContextId, MandateId, PaymentState, Record, RecordFilter, Store as _};
 use serde_json::Value;
 
 #[derive(Args)]
@@ -57,7 +57,12 @@ pub fn run(cmd: &Cmd) -> Result<Report, Failure> {
             .map_err(|e| Failure::undecided(format!("--mandate: {e}")))?,
         state: cmd.state,
     };
-    let after = cmd.after.as_deref().map(engine::context).transpose()?;
+    let after = cmd
+        .after
+        .as_deref()
+        .map(ContextId::new)
+        .transpose()
+        .map_err(|e| Failure::undecided(format!("--after: {e}")))?;
     let records = engine::store(&cmd.db)?
         .scan(&filter, after.as_ref(), cmd.limit)
         .map_err(|e| Failure::undecided(e.to_string()))?;

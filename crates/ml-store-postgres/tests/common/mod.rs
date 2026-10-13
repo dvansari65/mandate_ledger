@@ -91,8 +91,10 @@ fn run_id() -> &'static str {
 /// tests in parallel, each over a store of its own, and
 /// `PostgresStore::connect` opens ten connections per store up front: a
 /// dozen tests at once would sit at the server's default limit of a
-/// hundred. Eight, opened as needed, covers the widest test here and
-/// costs nothing while a test is idle.
+/// hundred. Eight, opened as needed, costs nothing while a test is idle.
+/// The widest race here spawns sixteen threads; the extra eight queue on
+/// the pool, which is the point — they contend over the ledger's locks,
+/// not over the server's connection slots.
 fn store(url: &str) -> ml_store_postgres::PostgresStore {
     let config: postgres::Config = url.parse().expect("database url");
     let manager = r2d2_postgres::PostgresConnectionManager::new(config, postgres::NoTls);

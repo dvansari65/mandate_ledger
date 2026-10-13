@@ -27,7 +27,10 @@ const LOCK_MIGRATE: i32 = 0;
 /// The schema, as an ordered list of migrations. `ml_schema` records which
 /// of them a database has applied, and [`PostgresStore::migrate`] runs only
 /// the rest — on a database that is already current, nothing at all.
-const MIGRATIONS: [&str; 1] = [include_str!("migrations/0001_initial.sql")];
+const MIGRATIONS: [&str; 2] = [
+    include_str!("migrations/0001_initial.sql"),
+    include_str!("migrations/0002_contexts_byte_order.sql"),
+];
 /// Serializes appends to one context, so the chain and the state advance
 /// one step at a time.
 const LOCK_CONTEXT: i32 = 1;

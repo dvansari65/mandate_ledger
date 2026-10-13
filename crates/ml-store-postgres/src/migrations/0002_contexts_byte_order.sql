@@ -1,0 +1,12 @@
+-- mandate-ledger PostgreSQL schema — migration 2, contexts in byte order.
+--
+-- `Store::scan` orders and pages ml_contexts by `ctx COLLATE "C"`, so every
+-- store lists contexts in one order whatever the database's locale. The
+-- primary key is in that locale's collation and cannot serve the byte
+-- order: without this index each page was a scan of the whole table and a
+-- sort, and with it a page is a walk of the index from the cursor.
+--
+-- A plain CREATE INDEX, not CONCURRENTLY, which cannot run inside the
+-- transaction migrations run in. It holds off appends for as long as one
+-- index over ml_contexts takes to build.
+CREATE INDEX ml_contexts_ctx_c ON ml_contexts (ctx COLLATE "C");

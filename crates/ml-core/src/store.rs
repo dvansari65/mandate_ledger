@@ -185,6 +185,9 @@ struct Inner {
     last_seq: u64,
     reserved: HashMap<MandateId, Money>,
     auth_times: HashMap<MandateId, Vec<Timestamp>>,
+    /// The longest velocity window, in seconds, any `Authorized` under the
+    /// mandate has carried: how far back its history can still count.
+    velocity_windows: HashMap<MandateId, i64>,
     nonces: HashMap<(String, String), ContextId>,
     revoked: HashSet<MandateId>,
 }
@@ -207,20 +210,27 @@ impl MemoryStore {
         Ok(self.lock()?.events.clone())
     }
 
-    /// Retention, by hand: forget what `before` has made irrelevant.
-    /// Velocity history older than `before` goes, and so do the chains and
-    /// records of contexts that were finished — delivered, compensated,
-    /// expired, or only ever refused — before it. Nonces stay, a spent
-    /// nonce being spent forever, as do live reservations and revocations.
-    /// Sequence numbers carry on from where they were, so a reader's cursor
-    /// survives. Export the evidence you still need first: a pruned chain is
-    /// gone. Prune no closer than the longest velocity window you issue, or
-    /// a window will undercount.
+    /// Retention, by hand: forget what `before` — a moment that has passed —
+    /// has made irrelevant.
+    ///
+    /// The chains of contexts finished before it — delivered, compensated,
+    /// expired, or only ever refused — go. Their records stay: a context id,
+    /// like a nonce, is spent forever, so a retry of a finished purchase is
+    /// refused rather than authorized again, and [`Store::scan`] still says
+    /// where it ended. Velocity history goes once it is older than `before`
+    /// by the longest window the mandate has been presented with, so a
+    /// window counts the same after a prune as before one. Nonces, live
+    /// reservations and revocations stay. Sequence numbers carry on from
+    /// where they were, so a reader's cursor survives, though
+    /// [`Store::events_after`] no longer returns what was pruned. Export the
+    /// evidence you still need first: a pruned chain is gone.
     pub fn prune(&self, before: Timestamp) -> Result<(), StoreError> {
         let mut g = self.lock()?;
         let inner = &mut *g;
-        for times in inner.auth_times.values_mut() {
-            times.retain(|t| *t >= before);
+        for (mandate, times) in &mut inner.auth_times {
+            let window = inner.velocity_windows.get(mandate).copied().unwrap_or(0);
+            let cutoff = before.saturating_sub_secs(window);
+            times.retain(|t| *t >= cutoff);
         }
         inner.auth_times.retain(|_, times| !times.is_empty());
 
@@ -239,7 +249,6 @@ impl MemoryStore {
         if gone.is_empty() {
             return Ok(());
         }
-        inner.records.retain(|ctx, _| !gone.contains(ctx));
         inner.events.retain(|e| !gone.contains(&e.ctx));
         inner.by_ctx.clear();
         for (i, e) in inner.events.iter().enumerate() {
@@ -328,6 +337,7 @@ impl Store for MemoryStore {
         // ── Phase 1: validate. Nothing is mutated until every check passes. ──
         let mut new_record: Option<Record> = None;
         let mut reserve: Option<(MandateId, Money)> = None;
+        let mut window: Option<i64> = None;
         let mut release: Option<(MandateId, Money)> = None;
         let mut consume_nonce: Option<(String, String)> = None;
 
@@ -368,6 +378,7 @@ impl Store for MemoryStore {
                     }
                 }
                 reserve = Some((mandate_id.clone(), next));
+                window = scope.velocity.map(|v| v.window_secs);
                 new_record = Some(Record {
                     ctx: ctx.clone(),
                     state: PaymentState::Authorized,
@@ -432,6 +443,10 @@ impl Store for MemoryStore {
 
         // ── Phase 2: commit. ──
         if let Some((m, next)) = reserve {
+            if let Some(secs) = window {
+                let longest = g.velocity_windows.entry(m.clone()).or_default();
+                *longest = (*longest).max(secs);
+            }
             g.reserved.insert(m.clone(), next);
             g.auth_times.entry(m).or_default().push(at);
         }

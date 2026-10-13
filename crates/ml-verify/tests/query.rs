@@ -120,34 +120,13 @@ fn scan_filters_by_mandate_and_state_in_byte_order() {
     assert_eq!(h.store.scan(&paid_under_m2, None, 10).unwrap(), []);
 }
 
-#[test]
-fn prune_forgets_finished_chains_and_old_history_but_never_a_nonce() {
-    let h = harness();
-    let m = mandate_with(
-        "mnd-1",
-        Scope {
-            velocity: Some(Velocity {
-                max_count: 2,
-                window_secs: 100,
-            }),
-            ..scope()
-        },
-    );
-    let done = h
-        .ledger
-        .authorize(&m, &cart("bigbasket.com", "10"), "done")
-        .unwrap();
-    let live = h
-        .ledger
-        .authorize(&m, &cart("bigbasket.com", "20"), "live")
-        .unwrap();
-    let paid = h
-        .ledger
-        .record_payment(&done, &MockProof::bound_to(done.ctx(), "spent", inr("10")))
-        .unwrap();
+/// Pay, settle and deliver `auth`, spending `nonce`.
+fn deliver(h: &Harness, auth: &Authorized, nonce: &str) {
+    let proof = MockProof::bound_to(auth.ctx(), nonce, auth.amount().clone());
+    let paid = h.ledger.record_payment(auth, &proof).unwrap();
     let Settlement::Settled(settled) = h
         .ledger
-        .record_settlement(&paid, &MockFinality::confirmed("spent", 1))
+        .record_settlement(&paid, &MockFinality::confirmed(nonce, 1))
         .unwrap()
     else {
         panic!("final at one confirmation")
@@ -157,28 +136,50 @@ fn prune_forgets_finished_chains_and_old_history_but_never_a_nonce() {
         attestation: Attestation::AgentReported,
     };
     h.ledger.record_delivery(&settled, receipt).unwrap();
+}
 
-    // The window is full now. Later, with the history older than the
-    // window pruned, it is empty — exactly as it would be with the history
-    // kept.
-    let third = cart("bigbasket.com", "30");
-    assert_eq!(
-        reason(&h.ledger.authorize(&m, &third, "third").unwrap_err()),
-        DenyReason::VelocityExceeded
-    );
+#[test]
+fn prune_forgets_finished_chains_and_keeps_live_ones() {
+    let h = harness();
+    let m = mandate();
+    let done = h
+        .ledger
+        .authorize(&m, &cart("bigbasket.com", "10"), "done")
+        .unwrap();
+    let live = h
+        .ledger
+        .authorize(&m, &cart("bigbasket.com", "20"), "live")
+        .unwrap();
+    deliver(&h, &done, "spent");
+    // A context that was only ever refused: its refusal is all it has.
+    let refused = h
+        .ledger
+        .authorize(&m, &cart("amazon.in", "1"), "refused")
+        .unwrap_err();
+    let refused_ctx = refused.denied().unwrap().ctx.clone();
     let last = h.store.last_seq().unwrap();
+
     h.clock.set(T0 + 60 + 200);
     h.store.prune(Timestamp(T0 + 60 + 100)).unwrap();
 
-    // The delivered chain and the refused one are gone; the live one stays.
-    assert_eq!(h.store.record(done.ctx()).unwrap(), None);
+    // The delivered chain and the refused one are gone. The delivered
+    // record stays — the context is still where it ended — and the live
+    // context is untouched.
     assert_eq!(h.store.events(done.ctx()).unwrap(), []);
     assert_eq!(h.ledger.evidence(done.ctx()).unwrap(), None);
+    assert_eq!(
+        h.store.record(done.ctx()).unwrap().map(|r| r.state),
+        Some(PaymentState::Delivered)
+    );
+    assert_eq!(h.store.events(&refused_ctx).unwrap(), []);
+    assert_eq!(h.store.record(&refused_ctx).unwrap(), None);
+    assert_eq!(h.store.events(live.ctx()).unwrap().len(), 1);
     assert_eq!(
         h.store.record(live.ctx()).unwrap().map(|r| r.state),
         Some(PaymentState::Authorized)
     );
-    assert_eq!(h.store.events(live.ctx()).unwrap().len(), 1);
+    let mut both = vec![done.ctx().clone(), live.ctx().clone()];
+    both.sort();
     assert_eq!(
         h.store
             .scan(&RecordFilter::default(), None, 10)
@@ -186,8 +187,9 @@ fn prune_forgets_finished_chains_and_old_history_but_never_a_nonce() {
             .into_iter()
             .map(|r| r.ctx)
             .collect::<Vec<_>>(),
-        [live.ctx().clone()]
+        both
     );
+    assert_eq!(h.store.reserved(m.id()).unwrap(), Some(inr("30")));
 
     // A nonce spent on a pruned chain is spent forever.
     assert_eq!(
@@ -201,7 +203,9 @@ fn prune_forgets_finished_chains_and_old_history_but_never_a_nonce() {
 
     // Sequence numbers carry on from where they were, so a cursor survives:
     // that refusal and this authorization are the next two.
-    h.ledger.authorize(&m, &third, "third").unwrap();
+    h.ledger
+        .authorize(&m, &cart("bigbasket.com", "30"), "next")
+        .unwrap();
     assert_eq!(
         h.store
             .events_after(last, 10)
@@ -212,4 +216,90 @@ fn prune_forgets_finished_chains_and_old_history_but_never_a_nonce() {
         [last + 1, last + 2]
     );
     assert_eq!(h.store.last_seq().unwrap(), last + 2);
+}
+
+#[test]
+fn a_retry_of_a_pruned_purchase_is_refused_not_authorized_again() {
+    let h = harness();
+    let m = mandate();
+    let cart = cart("bigbasket.com", "10");
+    let done = h.ledger.authorize(&m, &cart, "done").unwrap();
+    deliver(&h, &done, "spent");
+
+    // With the chain, a retry is the decided purchase: its token, and
+    // nothing reserved twice.
+    assert_eq!(
+        h.ledger.authorize(&m, &cart, "done").unwrap().ctx(),
+        done.ctx()
+    );
+    assert_eq!(h.store.reserved(m.id()).unwrap(), Some(inr("10")));
+
+    h.clock.set(T0 + 60 + 200);
+    h.store.prune(Timestamp(T0 + 60 + 100)).unwrap();
+
+    // Without it, the mandate the purchase was decided under is gone and
+    // the retry cannot be matched, so it is refused — as is a forgery,
+    // which without the chain looks exactly the same.
+    let err = h.ledger.authorize(&m, &cart, "done").unwrap_err();
+    assert_eq!(reason(&err), DenyReason::InvalidState);
+    let denied = err.denied().unwrap();
+    assert_eq!(denied.ctx, *done.ctx());
+    assert!(denied.detail.contains("pruned"), "{}", denied.detail);
+    let forged = Mandate::sign(m.body.clone(), &attacker_key()).unwrap();
+    assert_eq!(
+        reason(&h.ledger.authorize(&forged, &cart, "done").unwrap_err()),
+        DenyReason::InvalidState
+    );
+
+    // Nothing was reserved again, the record still says delivered, and the
+    // chain holds the two refusals and nothing else.
+    assert_eq!(h.store.reserved(m.id()).unwrap(), Some(inr("10")));
+    assert_eq!(
+        h.store.record(done.ctx()).unwrap().map(|r| r.state),
+        Some(PaymentState::Delivered)
+    );
+    let events = h.store.events(done.ctx()).unwrap();
+    assert_eq!(events.len(), 2);
+    assert!(
+        events
+            .iter()
+            .all(|e| matches!(e.body, EventBody::Denied { .. }))
+    );
+}
+
+#[test]
+fn prune_keeps_the_velocity_history_a_window_still_counts() {
+    let h = harness();
+    let m = mandate_with(
+        "mnd-1",
+        Scope {
+            velocity: Some(Velocity {
+                max_count: 2,
+                window_secs: 100,
+            }),
+            ..scope()
+        },
+    );
+    h.ledger
+        .authorize(&m, &cart("bigbasket.com", "10"), "one")
+        .unwrap();
+    h.ledger
+        .authorize(&m, &cart("bigbasket.com", "20"), "two")
+        .unwrap();
+    let third = cart("bigbasket.com", "30");
+
+    // Ninety seconds on, both are still inside the window. Pruning
+    // everything before now keeps them, because the window reaches back
+    // past `before`: the third purchase is refused exactly as it would be
+    // with nothing pruned.
+    h.clock.set(T0 + 60 + 90);
+    h.store.prune(Timestamp(T0 + 60 + 90)).unwrap();
+    assert_eq!(
+        reason(&h.ledger.authorize(&m, &third, "three").unwrap_err()),
+        DenyReason::VelocityExceeded
+    );
+
+    // Once the window has moved past them, it is empty — pruned or not.
+    h.clock.set(T0 + 60 + 101);
+    h.ledger.authorize(&m, &third, "three").unwrap();
 }

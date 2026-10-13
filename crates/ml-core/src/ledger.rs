@@ -78,7 +78,9 @@ where
     /// present the mandate the context was authorized under: the context id
     /// is derived from the mandate's *id*, so a different mandate claiming
     /// that id — another scope, another signer — lands on the same context,
-    /// and is refused `CONTEXT_MISMATCH` rather than handed its token.
+    /// and is refused `CONTEXT_MISMATCH` rather than handed its token. Once
+    /// a finished context's chain has been pruned there is nothing left to
+    /// match against, and a retry is refused `INVALID_STATE` instead.
     ///
     /// Order of checks: replay (the same mandate, or `CONTEXT_MISMATCH`) →
     /// signature → signer trust → revocation → scope (validity, attestation,
@@ -222,7 +224,9 @@ where
     /// signature is refused for what it is. The cart and the request key
     /// cannot differ — they are in the context id — so the mandate is the
     /// one thing to compare, and its `Authorized` event holds it as it was
-    /// presented.
+    /// presented. A finished context whose chain has been pruned has only
+    /// its record left; the retry cannot be told from a forgery, so neither
+    /// is handed the token.
     fn replay(
         &self,
         ctx: &ContextId,
@@ -239,10 +243,22 @@ where
                 e.to_string(),
             );
         }
-        let stored = self
-            .store
-            .authorized_mandate(ctx)?
-            .ok_or_else(|| corrupt("a record without an Authorized event"))?;
+        let Some(stored) = self.store.authorized_mandate(ctx)? else {
+            if rec.state.is_terminal() {
+                return self.deny(
+                    ctx,
+                    now,
+                    Stage::Authorize,
+                    DenyReason::InvalidState,
+                    format!(
+                        "context is {:?} and its chain has been pruned; \
+                         this purchase attempt is over",
+                        rec.state
+                    ),
+                );
+            }
+            return Err(corrupt("a record without an Authorized event"));
+        };
         let detail = if stored.body != mandate.body {
             "a different mandate with the same id"
         } else if stored.signer != mandate.signer {
