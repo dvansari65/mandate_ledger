@@ -170,6 +170,10 @@ and the rest — enumerated by `ml_core::DenyReason`. Operational failures, such
 as the store being unreachable, are separate error variants, and those *are*
 worth retrying.
 
+What *stable* means — for the codes, the evidence format, the database
+schema and the Rust API — is written down in
+[`docs/stability.md`](docs/stability.md).
+
 ## Durable storage
 
 `MemoryStore` holds everything in a `HashMap`, which is the right choice for
@@ -228,6 +232,10 @@ docs/threat-model.md       what is prevented, bounded, and out of scope
 docs/integration.md        how a merchant, gateway or wallet wires this in
 docs/sandbox.md            the ml command, its files and its exit codes
 docs/roadmap.md            what remains, in order, and why
+docs/stability.md          what may change between versions, and what may not
+docs/release.md            how a version is cut, tagged and published
+SECURITY.md                how to report a vulnerability, and what is in scope
+CHANGELOG.md               what changed, release by release
 ```
 
 ## Development
@@ -258,6 +266,12 @@ ML_DATABASE_URL=postgres://localhost/mandate_ledger_test scenarios/run-all.sh
 Every invariant in the core should trace back to a row in
 [`docs/threat-model.md`](docs/threat-model.md). Changes that add an invariant
 are easiest to review when they add the row too.
+
+`main` takes pull requests only: every job above must pass, every commit
+must be signed, and nothing is force-pushed. The rules are
+[`.github/rulesets/main.json`](.github/rulesets/main.json). Releases follow
+[`docs/release.md`](docs/release.md), and vulnerabilities go through
+[`SECURITY.md`](SECURITY.md), not the issue tracker.
 
 ## Status
 
