@@ -24,21 +24,29 @@ On a branch off `main`:
 
 1. Bump the version in `Cargo.toml`: `[workspace.package].version` and the
    three `version =` fields under `[workspace.dependencies]`, which path
-   dependencies need for publishing. `grep -n 'version = "' Cargo.toml`
-   shows all four. Then `cargo update --workspace`, so the lockfile follows.
-2. In `CHANGELOG.md`, rename *Unreleased* to `[x.y.z] — YYYY-MM-DD`, add a
+   dependencies need for publishing. Then `cargo update --workspace`, so
+   the lockfile follows.
+2. Replace the version everywhere prose states it: the README's warning
+   box and status section, and the landing page, `site/app/page.tsx`.
+   A grep for the version being replaced finds them all:
+
+   ```bash
+   git grep -n '0\.0\.1' -- ':!Cargo.lock' ':!site/pnpm-lock.yaml' ':!.claude'
+   ```
+
+3. In `CHANGELOG.md`, rename *Unreleased* to `[x.y.z] — YYYY-MM-DD`, add a
    fresh empty *Unreleased* above it, and update the link definitions at
    the bottom.
-3. Update the version in the README's status section.
-4. Run the whole release short of the upload:
+4. Commit, then run the whole release short of the upload:
 
    ```bash
    cargo +stable publish --workspace --dry-run
    ```
 
    It packages the three crates, builds each one from its package with the
-   others resolved from the same set, and stops at the upload. Fix anything
-   it finds before going on.
+   others resolved from the same set, and stops at the upload. It refuses
+   an uncommitted tree, and that is the point: what it checks is what the
+   commit publishes. Fix anything it finds, amend, run it again.
 5. Open the pull request, let CI finish, merge.
 
 ## Ship it
@@ -47,8 +55,8 @@ On `main` at the merge commit:
 
 ```bash
 git switch main && git pull --ff-only
-git tag -s v0.0.1 -m "mandate-ledger 0.0.1"
-git push origin v0.0.1
+git tag -s vX.Y.Z -m "mandate-ledger X.Y.Z"
+git push origin vX.Y.Z
 cargo +stable publish --workspace
 ```
 

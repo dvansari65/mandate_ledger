@@ -267,8 +267,8 @@ Every invariant in the core should trace back to a row in
 [`docs/threat-model.md`](docs/threat-model.md). Changes that add an invariant
 are easiest to review when they add the row too.
 
-`main` takes pull requests only: every job above must pass, every commit
-must be signed, and nothing is force-pushed. The rules are
+The rules for `main` — pull requests only, every job above green, every
+commit signed, nothing force-pushed — are
 [`.github/rulesets/main.json`](.github/rulesets/main.json). Releases follow
 [`docs/release.md`](docs/release.md), and vulnerabilities go through
 [`SECURITY.md`](SECURITY.md), not the issue tracker.

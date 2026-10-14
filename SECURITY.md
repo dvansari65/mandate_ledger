@@ -17,11 +17,11 @@ A report is most useful when it names the guarantee it breaks — a row of
 the style of [`scenarios/`](scenarios/), a failing test, or a sequence of
 `ml` commands with their output.
 
-You will have a reply within seven days. A confirmed vulnerability is fixed
-on a private fork, released as a patch, and published as a GitHub security
-advisory with an entry under *Security* in [`CHANGELOG.md`](CHANGELOG.md),
-crediting you unless you prefer otherwise. Please give the fix a chance to
-ship before disclosing.
+You will hear back once the report has been read. A confirmed vulnerability
+is fixed on a private fork, released as a patch, and published as a GitHub
+security advisory with an entry under *Security* in
+[`CHANGELOG.md`](CHANGELOG.md), crediting you unless you prefer otherwise.
+Please give the fix a chance to ship before disclosing.
 
 ## Scope
 
@@ -51,6 +51,6 @@ backported; stay on the latest one.
 ## Dependencies
 
 The dependency set is deliberately small. `cargo deny` checks licences,
-advisories and sources, and `cargo audit` checks advisories, on every push
-and pull request; Dependabot proposes updates weekly. Secret scanning and
+advisories and sources, and `cargo audit` checks advisories, on every pull
+request and every push to `main`; Dependabot proposes updates weekly. Secret scanning and
 push protection are on for the repository.
