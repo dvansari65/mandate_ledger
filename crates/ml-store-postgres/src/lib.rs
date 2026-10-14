@@ -49,6 +49,7 @@
 //! one row per authorization and has no retention job yet.
 
 #![forbid(unsafe_code)]
+#![deny(missing_docs)]
 
 mod convert;
 mod store;

@@ -37,6 +37,7 @@
 //! `docs/threat-model.md` in the repository.
 
 #![forbid(unsafe_code)]
+#![deny(missing_docs)]
 
 pub mod cart;
 pub mod error;

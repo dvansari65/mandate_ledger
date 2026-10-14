@@ -12,6 +12,7 @@
 //! module each, behind feature flags.
 
 #![forbid(unsafe_code)]
+#![deny(missing_docs)]
 
 pub mod mock;
 pub mod native;
