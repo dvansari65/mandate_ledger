@@ -14,6 +14,9 @@ version = "0.0.1"
 edition = "2024"
 license = "Apache-2.0"
 rust-version = "1.85"
+repository = "https://github.com/dvansari65/mandate_ledger"
+homepage = "https://mandate-ledger.vercel.app"
+readme = "README.md"
 
 [workspace.dependencies]
 ml-core = { path = "crates/ml-core", version = "0.0.1" }

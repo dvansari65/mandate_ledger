@@ -26,9 +26,16 @@ mandate, the cart, the proof and the finality disagree, and records why.
       connection budget
 
 ### 3. Hygiene
-- [ ] `SECURITY.md`, `CHANGELOG.md`, `#![deny(missing_docs)]` in the library
+- [x] `SECURITY.md`, `CHANGELOG.md`, `#![deny(missing_docs)]` in the library
       crates, a stability policy for the refusal codes and wire formats,
-      crates.io metadata, a release process, branch protection on `main`
+      crates.io metadata, a release process
+- [ ] Branch protection on `main`: import `.github/rulesets/main.json` from
+      Settings → Rules → Rulesets, and enable private vulnerability
+      reporting, which `SECURITY.md` relies on
+- [ ] Before 0.1, the other half of the stability policy: `#[non_exhaustive]`
+      on the remaining public enums, and constructors for the structs an
+      integrator builds (`VerifiedProof`, `DeliveryReceipt`), so that adding
+      a field is not a breaking change
 
 ### 4. The service and the SDK — the adoption path
 - [ ] `ml serve`: the five calls over HTTP; status codes mirror the exit codes
