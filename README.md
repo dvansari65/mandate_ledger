@@ -32,6 +32,7 @@ appended to a chain anyone can verify without access to your database.
 - [Getting started](#getting-started)
 - [The five calls](#the-five-calls)
 - [Durable storage](#durable-storage)
+- [As a service](#as-a-service)
 - [Extending it](#extending-it)
 - [Project layout](#project-layout)
 - [Development](#development)
@@ -201,6 +202,23 @@ transactions in
 sixteen threads against one budget yield exactly ten authorizations, and
 eight threads presenting one nonce yield exactly one payment.
 
+## As a service
+
+`ml-serve` is the same engine over HTTP, for a host that would rather not
+embed it: the five calls as routes, `200` allowed, `409` refused with the
+code, `503` could not decide. An API key, limits that shed load rather
+than queue it, structured logs, graceful shutdown, configuration from the
+environment, and an OpenAPI document generated from the code.
+
+```bash
+ML_DATABASE_URL=postgres://localhost/mandate_ledger \
+ML_API_KEYS="$(openssl rand -hex 32)" \
+ML_TRUSTED_SIGNERS="user:alice=$(jq -r .public alice.key.pub)" \
+cargo run -p ml-serve
+```
+
+[`docs/service.md`](docs/service.md) is the operator's guide.
+
 ## Extending it
 
 Four traits, each small:
@@ -225,12 +243,14 @@ crates/ml-adapters         NativeCartAdapter, MockRail
 crates/ml-store-postgres   durable PostgreSQL store
 crates/ml-verify           lifecycle, denial, concurrency, tamper and property tests
 crates/ml-sandbox          the ml command: drive the engine from a terminal
+crates/ml-serve            the service: the five calls over HTTP
 scenarios/                 the threat model, run: nine scripts driving ml
 examples/quickstart        runnable end to end, no database required
 site/                      landing page (Next.js, TypeScript)
 docs/threat-model.md       what is prevented, bounded, and out of scope
 docs/integration.md        how a merchant, gateway or wallet wires this in
 docs/sandbox.md            the ml command, its files and its exit codes
+docs/service.md            the service: routes, status codes, configuration
 docs/roadmap.md            what remains, in order, and why
 docs/stability.md          what may change between versions, and what may not
 docs/release.md            how a version is cut, tagged and published
