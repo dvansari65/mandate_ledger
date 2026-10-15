@@ -8,9 +8,9 @@
 
 use crate::Failure;
 use crate::engine::{self, DbArgs, RailArgs, TrustArgs};
-use crate::rail::{Finality, Reported};
 use crate::report::Report;
 use clap::Args;
+use ml_adapters::sandbox::{Finality, Reported};
 use ml_core::{DenyReason, Settlement, Stage};
 
 #[derive(Args)]
