@@ -7,6 +7,9 @@
 //!   adapter for a real protocol.
 //! - [`mock`] — a rail that accepts what you tell it to. For tests and
 //!   examples; never for production.
+//! - [`sandbox`] — a rail the operator drives: told what to report, or
+//!   answering from the payment reference. For sandboxes; never for
+//!   production.
 //!
 //! Protocol adapters (x402, AP2, ACP, MPP) will live here as they land, one
 //! module each, behind feature flags.
@@ -15,6 +18,8 @@
 
 pub mod mock;
 pub mod native;
+pub mod sandbox;
 
 pub use mock::{MockFinality, MockProof, MockRail};
 pub use native::{NativeAttestation, NativeCart, NativeCartAdapter};
+pub use sandbox::SandboxRail;

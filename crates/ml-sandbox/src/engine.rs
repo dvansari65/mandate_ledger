@@ -6,11 +6,11 @@
 //! and it is the point: nothing survives between two commands except what
 //! the database holds.
 
-use crate::rail::SandboxRail;
 use crate::report::Report;
+use crate::sandbox::DatabaseChecks;
 use crate::{Failure, keys, sandbox};
 use clap::Args;
-use ml_adapters::NativeCartAdapter;
+use ml_adapters::{NativeCartAdapter, SandboxRail};
 use ml_core::{
     Clock, ContextId, Denied, DenyReason, Ledger, LedgerError, Money, PaymentState, PrincipalId,
     Reached, Stage, SystemClock, Timestamp, TrustedSigners,
@@ -18,6 +18,7 @@ use ml_core::{
 use ml_store_postgres::PostgresStore;
 use postgres::{Config, NoTls};
 use r2d2_postgres::PostgresConnectionManager;
+use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
@@ -57,15 +58,15 @@ pub struct RailArgs {
 
     /// Confirmations the rail needs before it calls a payment final. At
     /// least one: "final at zero confirmations" is not a threshold.
-    #[arg(long, default_value_t = 1, value_name = "N", value_parser = clap::value_parser!(u32).range(1..))]
-    finality: u32,
+    #[arg(long, default_value = "1", value_name = "N")]
+    finality: NonZeroU32,
 }
 
 impl Default for RailArgs {
     fn default() -> Self {
         Self {
             rail: "mock".to_owned(),
-            finality: 1,
+            finality: NonZeroU32::MIN,
         }
     }
 }
@@ -193,7 +194,11 @@ pub fn ledger(db: &DbArgs, trust: &TrustArgs, rail: &RailArgs) -> Result<Engine,
     };
     // The rail shares the command's one connection: the engine consults it
     // between store calls, never during one.
-    let rail = SandboxRail::new(rail.rail.clone(), rail.finality, store.pool().clone());
+    let rail = SandboxRail::new(
+        rail.rail.clone(),
+        rail.finality,
+        DatabaseChecks(store.pool().clone()),
+    );
     Ok(Ledger::new(store, rail, signers, clock))
 }
 

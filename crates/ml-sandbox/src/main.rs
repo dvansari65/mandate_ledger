@@ -31,7 +31,6 @@ mod keys;
 mod log;
 mod mandate;
 mod pay;
-mod rail;
 mod report;
 mod revoke;
 mod sandbox;
