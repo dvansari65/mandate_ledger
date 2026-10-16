@@ -35,27 +35,16 @@ export default function Page() {
         <section className="wrap hero">
           <div className="hero-copy">
             <span className="tag rise">Enforcement layer for agent-driven payments</span>
-            <h1 className="rise" style={{ animationDelay: "80ms" }}>The agent can spend. The ledger decides whether it <em>may</em>.</h1>
+            <h1 className="rise" style={{ animationDelay: "80ms" }}>The agent can spend. The ledger decides whether it may.</h1>
             <p className="lede rise" style={{ animationDelay: "160ms" }}>
               It sits between the agent and the payment rail, refuses any step where the mandate, the cart, the payment
               and the settlement disagree, and keeps the record. It never moves money.
             </p>
             <div className="actions rise" style={{ animationDelay: "240ms" }}>
-              <a className="btn" href={`${DOCS}/integration.md`}>Get started</a>
               <a className="link" href={REPO}>View on GitHub →</a>
             </div>
           </div>
           <div className="rise" style={{ animationDelay: "200ms" }}><Diagram /></div>
-        </section>
-
-        <section className="wrap proof" aria-label="Trust">
-          <ul>
-            <li><b>Open source</b> Apache-2.0</li>
-            <li><b>48</b> tests</li>
-            <li><b>6,000</b> property cases</li>
-            <li><b>0</b> unsafe code</li>
-            <li>Built on the <a href={PAPER}>formal analysis</a> of x402, AP2, ACP and MPP</li>
-          </ul>
         </section>
 
         <section className="band" id="problem">
