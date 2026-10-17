@@ -9,6 +9,7 @@
 //! catalogs — and readers never issue DDL, so a command that only reads is
 //! never queued behind one that creates.
 
+use ml_adapters::sandbox::ReorgChecks;
 use ml_core::{Clock as _, SystemClock, Timestamp};
 use ml_store_postgres::PgPool;
 use postgres::{Client, GenericClient};
@@ -134,4 +135,14 @@ pub fn count_check(pool: &PgPool, rail: &str, reference: &str) -> Result<u32> {
         .and_then(|row| row.try_get(0))
         .map_err(|e| e.to_string())?;
     u32::try_from(checks).map_err(|e| e.to_string())
+}
+
+/// The sandbox rail's memory: its finality checks, in the database, so
+/// that a `…-reorg` reference counts across `ml` processes.
+pub struct DatabaseChecks(pub PgPool);
+
+impl ReorgChecks for DatabaseChecks {
+    fn count(&self, rail: &str, reference: &str) -> Result<u32> {
+        count_check(&self.0, rail, reference)
+    }
 }
