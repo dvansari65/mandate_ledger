@@ -35,7 +35,7 @@
         "tags": [
           "ops"
         ],
-        "summary": "The process can reach its store. One check runs at a time; a second\ncaller while one is in flight is told to come back, so that nobody can\ndrain the pool through this door.",
+        "summary": "The process can reach its store. Probes are coalesced: one check at a\ntime, its answer shared with every probe that arrives meanwhile and\nfor a moment after, so nobody can drain the store through this door\nand no probe fails for lack of a turn.",
         "operationId": "readyz",
         "responses": {
           "200": {

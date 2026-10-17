@@ -7,8 +7,8 @@ same codes and the same rules, and the two can share a database.
 
 ```bash
 cargo build -p ml-serve
+export ML_API_KEYS="$(openssl rand -hex 32)"      # keep it: the clients need it
 ML_DATABASE_URL=postgres://localhost/mandate_ledger \
-ML_API_KEYS="$(openssl rand -hex 32)" \
 ML_TRUSTED_SIGNERS="user:alice=$(jq -r .public alice.key.pub)" \
 target/debug/ml-serve
 ```
@@ -21,7 +21,7 @@ target/debug/ml-serve
   |---|---|
   | `200` | The step was allowed; the body states the token's facts. |
   | `409` | The ledger evaluated the step and **refused** it. A decision, not a failure: `code`, `stage`, `detail`, `ctx` and `recorded`. Never retry it. |
-  | `503` | The ledger could not decide: the store or the rail was unavailable, every permit was in use, or the call timed out. `Retry-After: 1`. Read the context back first: a step that timed out may still have been recorded. |
+  | `503` | The ledger could not decide: the store was unavailable, every permit was in use, or the call timed out. `Retry-After: 1`. Read the context back first: a step that timed out may still have been recorded. When the rail could not be consulted, the body carries the rail's own words — the sandbox rail's "no report for this reference" is something only the caller can fix. |
   | `400`, `413`, `415`, `422` | Not a request the ledger can be asked: malformed JSON, an unknown field, an id out of bounds, a body too large, the wrong content type. |
   | `401` | No valid API key. |
   | `404` | A read of something that does not exist. Reads only: a lifecycle step on an unknown context is `409 CONTEXT_NOT_FOUND`, as in `ml`. |
@@ -71,7 +71,7 @@ The full shapes are in [`crates/ml-serve/openapi.json`](../crates/ml-serve/opena
 A lifecycle, with `jq` and a mandate from `ml mandate sign`:
 
 ```bash
-H=(-H "Authorization: Bearer $KEY" -H 'Content-Type: application/json')
+H=(-H "Authorization: Bearer $ML_API_KEYS" -H 'Content-Type: application/json')
 ctx=$(jq -n --slurpfile m mandate.json '{mandate: $m[0], request_key: "order-1",
       cart: {merchant: "bigbasket.com", total: {amount: "128.00", currency: "INR"}}}' \
     | curl -sS "${H[@]}" --data-binary @- localhost:8080/v1/authorizations | jq -r .ctx)
@@ -86,7 +86,9 @@ The rail is the sandbox rail until a real one lands: a payment reference
 ending in `-ok` settles, `-fail` fails, `-reorg` gains a confirmation per
 check and is then dropped, and `finality` can tell the rail what to report
 instead. Its id defaults to `mock`, the same as `ml`'s, so the two agree
-about one database.
+about one database — except for the `-reorg` check count, which the
+service keeps in memory: a restart forgets it, and `ml` keeps its own in a
+table.
 
 ## Configuration
 
@@ -125,16 +127,25 @@ the evidence key is the `secret` field of one.
   permit each, as many permits as the pool has connections; a request that
   finds none is `503` at once. A call that outlives
   `ML_REQUEST_TIMEOUT_SECS` is `503` too, but keeps running to its end —
-  the permit is held until then, and whatever it recorded stands. One
-  readiness check runs at a time, with a connection of its own, so nobody
-  drains the pool through `/readyz`.
+  the permit is held until then, and whatever it recorded stands. The end
+  is bounded: every statement and every lock wait is cancelled by
+  PostgreSQL at the same timeout (`statement_timeout` and `lock_timeout`
+  are set on the connection), so a wedged session cannot keep a permit.
+- **Readiness is cheap to ask and hard to abuse.** `/readyz` has a
+  connection of its own, separate from the ledger's pool. One check runs
+  at a time, and every probe that arrives meanwhile — and for a second
+  after — gets the same answer, so a stream of probes costs one round trip
+  a second and never fails a probe for lack of a turn.
 - **Logs** are JSON on stderr: method, path, status, latency, request id,
   key fingerprint, and for a refusal the context, stage and code. Never a
   body, a mandate, a cart or a key.
 - **Stopping**: `SIGTERM` or Ctrl-C stops accepting, lets in-flight
-  requests finish within `ML_SHUTDOWN_GRACE_SECS`, and exits. A bad
-  configuration exits `64` before touching anything; a database that
-  cannot be reached or prepared exits `1`.
+  requests finish within `ML_SHUTDOWN_GRACE_SECS`, gives ledger calls
+  still on blocking threads the same grace once more, and exits whatever
+  they are doing. A bad configuration — including a database URL that is
+  not one, or a log filter or format that is not one — exits `64` before
+  touching anything; a database that cannot be reached or prepared exits
+  `1`.
 - **Not yet**: metrics, per-key rate limits, the finality webhook, a
   Docker image. They are the next items in [`roadmap.md`](roadmap.md).
 

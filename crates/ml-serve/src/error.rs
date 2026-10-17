@@ -22,7 +22,8 @@ pub enum ApiError {
     Rejected {
         /// The status to answer with.
         status: StatusCode,
-        /// What was wrong. Never echoes the request.
+        /// What was wrong: the field, and what was expected. It may quote
+        /// the offending value the way serde reports it, never the body.
         message: String,
     },
     /// Every permit is in use. `503`, right away.
@@ -30,9 +31,14 @@ pub enum ApiError {
     /// The ledger did not answer within the request timeout. The work may
     /// still complete and be recorded. `503`.
     Timeout,
-    /// The store or the rail was unavailable; the step was not evaluated.
-    /// Logged with its cause, answered without it. `503`.
+    /// The store was unavailable; the step was not evaluated. Logged with
+    /// its cause, answered without it. `503`.
     Undecided(String),
+    /// The rail could not be consulted, and said why. The rail is one of
+    /// this project's own adapters, and what it says is for the caller as
+    /// much as for the log: the sandbox rail's "no report for this
+    /// reference" is something only the caller can fix. `503`.
+    RailUnavailable(String),
     /// The service itself failed. Logged with its cause. `500`.
     Internal(String),
 }
@@ -52,7 +58,7 @@ impl From<LedgerError> for ApiError {
         match err {
             LedgerError::Denied(denied) => Self::Refused(denied),
             LedgerError::Store(e) => Self::Undecided(e.to_string()),
-            LedgerError::RailUnavailable(e) => Self::Undecided(format!("rail unavailable: {e}")),
+            LedgerError::RailUnavailable(e) => Self::RailUnavailable(e),
             LedgerError::Canonicalize(e) => Self::Internal(e.to_string()),
         }
     }
@@ -98,6 +104,10 @@ impl IntoResponse for ApiError {
             Self::Undecided(cause) => {
                 tracing::error!(%cause, "could not decide");
                 retry_later("the ledger could not decide; read the context back, then retry")
+            }
+            Self::RailUnavailable(cause) => {
+                tracing::warn!(%cause, "rail unavailable");
+                retry_later(&format!("the rail could not be consulted: {cause}"))
             }
             Self::Internal(cause) => {
                 tracing::error!(%cause, "internal error");

@@ -18,6 +18,8 @@
 //! | `ML_REQUEST_TIMEOUT_SECS` | One ledger call, 1–300 | `30` |
 //! | `ML_BODY_LIMIT` | Largest request body, bytes, 1 KiB–16 MiB | `262144` |
 //! | `ML_SHUTDOWN_GRACE_SECS` | How long in-flight requests get after a stop signal, 0–600 | `20` |
+//! | `ML_LOG` | A `tracing` filter | `info` |
+//! | `ML_LOG_FORMAT` | `json` or `text` | `json` |
 
 use crate::auth::ApiKeys;
 use ml_core::{PrincipalId, Secret, SigningKey, VerifyingKey};
@@ -32,8 +34,9 @@ use std::time::Duration;
 pub struct Config {
     /// Address to bind.
     pub listen: SocketAddr,
-    /// The PostgreSQL URL. May carry a password, so it is never displayed.
-    pub database_url: Secret<String>,
+    /// The PostgreSQL connection. It may carry a password, so it is never
+    /// displayed.
+    pub database: Secret<postgres::Config>,
     /// Pool size, and the number of ledger calls in flight at once.
     pub db_pool: u32,
     /// Accepted API keys.
@@ -54,6 +57,31 @@ pub struct Config {
     pub body_limit: usize,
     /// How long in-flight requests get after a stop signal.
     pub shutdown_grace: Duration,
+    /// The `tracing` filter.
+    pub log_filter: String,
+    /// How log lines are written.
+    pub log_format: LogFormat,
+}
+
+/// How log lines are written.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LogFormat {
+    /// One JSON object per line, for machines.
+    Json,
+    /// Human-readable lines, for a terminal.
+    Text,
+}
+
+impl FromStr for LogFormat {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "json" => Ok(Self::Json),
+            "text" => Ok(Self::Text),
+            _ => Err("must be json or text".to_owned()),
+        }
+    }
 }
 
 /// Every problem with the environment, together.
@@ -182,10 +210,21 @@ impl Config {
         };
 
         let listen = r.parsed("ML_LISTEN", SocketAddr::from(([127, 0, 0, 1], 8080)));
-        let database_url = r.raw("ML_DATABASE_URL").unwrap_or_else(|| {
-            r.problem("ML_DATABASE_URL", "required");
-            String::new()
-        });
+        let database = match r.raw("ML_DATABASE_URL") {
+            None => {
+                r.problem("ML_DATABASE_URL", "required");
+                None
+            }
+            // The parse error is not shown: it can quote a character of
+            // the string, and the string can carry a password.
+            Some(url) => {
+                let parsed = url.parse::<postgres::Config>().ok();
+                if parsed.is_none() {
+                    r.problem("ML_DATABASE_URL", "not a PostgreSQL connection string");
+                }
+                parsed
+            }
+        };
         let db_pool = u32::try_from(r.within("ML_DB_POOL", 8, 1..=64)).unwrap_or(8);
         let api_keys = match r.raw("ML_API_KEYS") {
             None => {
@@ -227,11 +266,16 @@ impl Config {
             usize::try_from(r.within("ML_BODY_LIMIT", 262_144, 1024..=16 * 1024 * 1024))
                 .unwrap_or(262_144);
         let shutdown_grace = Duration::from_secs(r.within("ML_SHUTDOWN_GRACE_SECS", 20, 0..=600));
+        let log_filter = r.raw("ML_LOG").unwrap_or_else(|| "info".to_owned());
+        if tracing_subscriber::EnvFilter::try_new(&log_filter).is_err() {
+            r.problem("ML_LOG", "not a tracing filter");
+        }
+        let log_format = r.parsed("ML_LOG_FORMAT", LogFormat::Json);
 
-        match (r.problems.is_empty(), api_keys) {
-            (true, Some(api_keys)) => Ok(Self {
+        match (r.problems.is_empty(), api_keys, database) {
+            (true, Some(api_keys), Some(database)) => Ok(Self {
                 listen,
-                database_url: Secret::new(database_url),
+                database: Secret::new(database),
                 db_pool,
                 api_keys,
                 signers,
@@ -242,6 +286,8 @@ impl Config {
                 request_timeout,
                 body_limit,
                 shutdown_grace,
+                log_filter,
+                log_format,
             }),
             _ => Err(ConfigError {
                 problems: r.problems,
@@ -279,6 +325,8 @@ mod tests {
         assert_eq!(config.rail_id, "mock");
         assert_eq!(config.signers.len(), 0);
         assert!(config.evidence_key.is_none());
+        assert_eq!(config.log_filter, "info");
+        assert_eq!(config.log_format, LogFormat::Json);
     }
 
     #[test]
@@ -289,6 +337,8 @@ mod tests {
             ("ML_TRUSTED_SIGNERS", "alice=nothex"),
             ("ML_EVIDENCE_KEY", "abcd"),
             ("ML_LISTEN", "nowhere"),
+            ("ML_LOG", "info,,=bogus"),
+            ("ML_LOG_FORMAT", "txt"),
         ])
         .unwrap_err();
         let text = err.to_string();
@@ -299,6 +349,8 @@ mod tests {
             "ML_TRUSTED_SIGNERS: entry 1: not hex",
             "ML_EVIDENCE_KEY: 2 bytes, need 32",
             "ML_LISTEN:",
+            "ML_LOG: not a tracing filter",
+            "ML_LOG_FORMAT: must be json or text",
         ] {
             assert!(text.contains(expected), "{text}");
         }
@@ -310,6 +362,21 @@ mod tests {
     }
 
     #[test]
+    fn a_database_url_that_is_not_one_is_refused_without_being_shown() {
+        let err = read(&[
+            (
+                "ML_DATABASE_URL",
+                "postgres://user:hunter2@host:notaport/db",
+            ),
+            ("ML_API_KEYS", KEY),
+        ])
+        .unwrap_err();
+        let text = err.to_string();
+        assert_eq!(text, "ML_DATABASE_URL: not a PostgreSQL connection string");
+        assert!(!text.contains("hunter2"));
+    }
+
+    #[test]
     fn keys_are_parsed_and_validated() {
         let config = read(&[
             ("ML_DATABASE_URL", "postgres://x"),
@@ -317,12 +384,14 @@ mod tests {
             ("ML_TRUSTED_SIGNERS", &format!("user:alice={PUBLIC}")),
             ("ML_MERCHANT_KEYS", &format!("bb-2026={PUBLIC}")),
             ("ML_RAIL_FINALITY", "3"),
+            ("ML_LOG_FORMAT", "text"),
         ])
         .unwrap();
         assert_eq!(config.signers.len(), 1);
         assert_eq!(config.signers[0].0.as_str(), "user:alice");
         assert_eq!(config.merchant_keys[0].0, "bb-2026");
         assert_eq!(config.rail_finality.get(), 3);
+        assert_eq!(config.log_format, LogFormat::Text);
         assert!(
             config
                 .api_keys

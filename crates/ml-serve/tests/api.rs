@@ -70,12 +70,25 @@ async fn every_v1_route_needs_a_key() {
         send(&app.router, basic).await.status,
         StatusCode::UNAUTHORIZED
     );
-    let lower = http::Request::builder()
-        .uri("/v1/events")
-        .header(AUTHORIZATION, format!("bearer {KEY}"))
-        .body(axum::body::Body::empty())
-        .unwrap();
-    assert_eq!(send(&app.router, lower).await.status, StatusCode::OK);
+    for header in [format!("bearer {KEY}"), format!("Bearer   {KEY}")] {
+        let request = http::Request::builder()
+            .uri("/v1/events")
+            .header(AUTHORIZATION, header)
+            .body(axum::body::Body::empty())
+            .unwrap();
+        assert_eq!(send(&app.router, request).await.status, StatusCode::OK);
+    }
+    // A wrong method on a protected route is refused like any other request
+    // without a key; with one, it is a JSON 405.
+    let wrong = call(&app.router, "DELETE", "/v1/events", None, None).await;
+    assert_eq!(wrong.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(wrong.headers["www-authenticate"], "Bearer");
+    let wrong = call(&app.router, "DELETE", "/v1/events", None, Some(KEY)).await;
+    assert_eq!(wrong.status, StatusCode::METHOD_NOT_ALLOWED);
+    assert_eq!(
+        wrong.body,
+        json!({"error": "method not allowed on this route"})
+    );
     // The spec needs no key either; an unknown route is a JSON 404.
     assert_eq!(
         call(&app.router, "GET", "/openapi.json", None, None)
@@ -297,6 +310,17 @@ async fn malformed_requests_are_client_errors_not_refusals() {
     let reply = get(router, &format!("/v1/contexts/{}", "c".repeat(300))).await;
     assert_eq!(reply.status, StatusCode::BAD_REQUEST);
     assert!(reply.str("error").starts_with("ctx:"));
+    let reply = get(router, "/v1/contexts/%FF").await;
+    assert_eq!(reply.status, StatusCode::BAD_REQUEST);
+    assert_eq!(reply.headers[CONTENT_TYPE], "application/json");
+    assert!(reply.str("error").contains("ctx"), "{}", reply.body);
+
+    // A merchant key id the adapter would quote back is bounded first.
+    let mut long_key = authorize_body(&m, signed_cart("bigbasket.com", "10.00"), "order-4");
+    long_key["cart"]["attestation"]["key_id"] = json!("k".repeat(300));
+    let reply = post(router, "/v1/authorizations", long_key).await;
+    assert_eq!(reply.status, StatusCode::BAD_REQUEST);
+    assert!(reply.str("error").starts_with("cart.attestation.key_id:"));
 
     // Query parameters are checked too.
     for query in ["limit=501", "state=bogus", "after=", "bogus=1"] {
@@ -429,6 +453,34 @@ async fn settlement_pending_failed_and_compensation() {
     .await;
     assert_eq!(again.status, StatusCode::OK);
 
+    // A reference the rail cannot answer for is the rail's own message,
+    // not a generic retry: only the caller can fix it.
+    let ctx = authorize(router, &m, cart("bigbasket.com", "30.00"), "order-7b").await;
+    post(
+        router,
+        &format!("/v1/contexts/{ctx}/payment"),
+        proof("pay-7b", "30.00"),
+    )
+    .await;
+    let reply = post(
+        router,
+        &format!("/v1/contexts/{ctx}/settlement"),
+        json!({"finality": {}}),
+    )
+    .await;
+    assert_eq!(
+        reply.status,
+        StatusCode::SERVICE_UNAVAILABLE,
+        "{}",
+        reply.body
+    );
+    assert!(
+        reply.str("error").contains("no report for `pay-7b`"),
+        "{}",
+        reply.body
+    );
+    assert_eq!(reply.headers["retry-after"], "1");
+
     // Telling the rail two things at once is a bad request.
     let reply = post(
         router,
@@ -559,7 +611,7 @@ async fn contexts_and_events_page() {
     assert_eq!(rest.body["contexts"][0]["ctx"], json!(ctxs[2]));
     let empty = get(router, &format!("/v1/contexts?after={}", ctxs[2])).await;
     assert_eq!(empty.body["contexts"], json!([]));
-    assert_eq!(empty.str("next"), ctxs[2]);
+    assert_eq!(empty.body["next"], Value::Null);
 
     let paid = get(router, "/v1/contexts?state=paid&mandate=mnd-1").await;
     assert_eq!(paid.body["contexts"].as_array().unwrap().len(), 1);
@@ -673,7 +725,7 @@ async fn load_past_the_permits_is_shed_at_once() {
     let router = app_over(
         Slow {
             inner: ledger,
-            delay: Duration::from_millis(300),
+            delay: Duration::from_secs(1),
         },
         AppOptions {
             permits: 1,
@@ -682,7 +734,7 @@ async fn load_past_the_permits_is_shed_at_once() {
         Box::new(|| Ok(())),
     );
     let (first, second) = tokio::join!(get(&router, "/v1/contexts/ctx-a"), async {
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
         get(&router, "/v1/contexts/ctx-b").await
     });
     assert_eq!(first.status, StatusCode::NOT_FOUND);
@@ -705,10 +757,10 @@ async fn a_call_that_outlives_the_timeout_is_503() {
     let router = app_over(
         Slow {
             inner: ledger,
-            delay: Duration::from_millis(300),
+            delay: Duration::from_secs(1),
         },
         AppOptions {
-            request_timeout: Duration::from_millis(50),
+            request_timeout: Duration::from_millis(100),
             ..options()
         },
         Box::new(|| Ok(())),
@@ -721,4 +773,36 @@ async fn a_call_that_outlives_the_timeout_is_503() {
         reply.body
     );
     assert!(reply.str("error").contains("read the context back"));
+}
+
+#[tokio::test]
+async fn readiness_probes_are_coalesced_and_briefly_cached() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let checks = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&checks);
+    let (ledger, _) = ledger();
+    let router = app_over(
+        ledger,
+        options(),
+        Box::new(move || {
+            counted.fetch_add(1, Ordering::SeqCst);
+            std::thread::sleep(Duration::from_millis(500));
+            Ok(())
+        }),
+    );
+    // Three probes at once: one check, three answers.
+    let (a, b, c) = tokio::join!(
+        call(&router, "GET", "/readyz", None, None),
+        call(&router, "GET", "/readyz", None, None),
+        call(&router, "GET", "/readyz", None, None),
+    );
+    for reply in [&a, &b, &c] {
+        assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    }
+    assert_eq!(checks.load(Ordering::SeqCst), 1);
+    // Right after, the answer is reused.
+    let again = call(&router, "GET", "/readyz", None, None).await;
+    assert_eq!(again.status, StatusCode::OK);
+    assert_eq!(checks.load(Ordering::SeqCst), 1);
 }

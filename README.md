@@ -211,8 +211,8 @@ than queue it, structured logs, graceful shutdown, configuration from the
 environment, and an OpenAPI document generated from the code.
 
 ```bash
+export ML_API_KEYS="$(openssl rand -hex 32)"      # the clients need it too
 ML_DATABASE_URL=postgres://localhost/mandate_ledger \
-ML_API_KEYS="$(openssl rand -hex 32)" \
 ML_TRUSTED_SIGNERS="user:alice=$(jq -r .public alice.key.pub)" \
 cargo run -p ml-serve
 ```

@@ -21,14 +21,10 @@ use ml_core::{
     ContextId, Denied, DenyReason, MandateId, PaymentState, RecordFilter, Settlement, Stage,
 };
 use std::any::Any;
-use std::time::Duration;
 
 /// The page size when none is asked for, and the most that may be.
 const DEFAULT_LIMIT: usize = 50;
 const MAX_LIMIT: usize = 500;
-
-/// How long readiness waits for the store.
-const READY_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// A JSON body, with the extractor's rejection in the service's own shape.
 pub struct Body<T>(pub T);
@@ -64,6 +60,23 @@ where
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, ApiError> {
         match Query::<T>::from_request_parts(parts, state).await {
             Ok(Query(value)) => Ok(Self(value)),
+            Err(rejection) => Err(ApiError::Rejected {
+                status: rejection.status(),
+                message: rejection.body_text(),
+            }),
+        }
+    }
+}
+
+/// A path segment, with the extractor's rejection in the service's own shape.
+pub struct Segment(pub String);
+
+impl<S: Send + Sync> FromRequestParts<S> for Segment {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, ApiError> {
+        match Path::<String>::from_request_parts(parts, state).await {
+            Ok(Path(segment)) => Ok(Self(segment)),
             Err(rejection) => Err(ApiError::Rejected {
                 status: rejection.status(),
                 message: rejection.body_text(),
@@ -175,7 +188,7 @@ pub async fn authorize(
 )]
 pub async fn payment(
     State(app): State<App>,
-    Path(ctx): Path<String>,
+    Segment(ctx): Segment,
     Body(request): Body<PaymentRequest>,
 ) -> Reply<PaidResponse> {
     let ctx = context(&ctx)?;
@@ -209,7 +222,7 @@ pub async fn payment(
 )]
 pub async fn settlement(
     State(app): State<App>,
-    Path(ctx): Path<String>,
+    Segment(ctx): Segment,
     Body(request): Body<SettlementRequest>,
 ) -> Reply<SettlementResponse> {
     let ctx = context(&ctx)?;
@@ -275,7 +288,7 @@ pub async fn settlement(
 )]
 pub async fn compensation(
     State(app): State<App>,
-    Path(ctx): Path<String>,
+    Segment(ctx): Segment,
     Body(request): Body<CompensationRequest>,
 ) -> Reply<CompensatedResponse> {
     let ctx = context(&ctx)?;
@@ -320,7 +333,7 @@ pub async fn compensation(
 )]
 pub async fn delivery(
     State(app): State<App>,
-    Path(ctx): Path<String>,
+    Segment(ctx): Segment,
     Body(request): Body<DeliveryRequest>,
 ) -> Reply<DeliveredResponse> {
     let ctx = context(&ctx)?;
@@ -359,7 +372,7 @@ pub async fn delivery(
     ),
     security(("api_key" = []))
 )]
-pub async fn expiry(State(app): State<App>, Path(ctx): Path<String>) -> Reply<ExpiredResponse> {
+pub async fn expiry(State(app): State<App>, Segment(ctx): Segment) -> Reply<ExpiredResponse> {
     let ctx = context(&ctx)?;
     let ctx = decide(&app, move |ledger| {
         let reached = ledger
@@ -390,7 +403,7 @@ pub async fn expiry(State(app): State<App>, Path(ctx): Path<String>) -> Reply<Ex
 )]
 pub async fn revocation(
     State(app): State<App>,
-    Path(mandate): Path<String>,
+    Segment(mandate): Segment,
 ) -> Reply<RevokedResponse> {
     let mandate = mandate_id(&mandate)?;
     let mandate = decide(&app, move |ledger| {
@@ -419,7 +432,7 @@ pub async fn revocation(
 )]
 pub async fn context_status(
     State(app): State<App>,
-    Path(ctx): Path<String>,
+    Segment(ctx): Segment,
 ) -> Reply<ContextResponse> {
     let ctx = context(&ctx)?;
     let record = decide(&app, move |ledger| Ok(ledger.record(&ctx)?))
@@ -451,10 +464,10 @@ pub async fn contexts(
             .as_deref()
             .map(|s| {
                 serde_json::from_value(serde_json::Value::String(s.to_owned())).map_err(|_| {
-                    ApiError::bad_request(format!(
-                        "state: unknown state `{s}`; one of authorized, paid, settled, \
-                         settlement_failed, compensated, delivered, expired"
-                    ))
+                    ApiError::bad_request(
+                        "state: not one of authorized, paid, settled, settlement_failed, \
+                         compensated, delivered, expired",
+                    )
                 })
             })
             .transpose()?,
@@ -469,10 +482,7 @@ pub async fn contexts(
         Ok(ledger.scan(&filter, after.as_ref(), limit)?)
     })
     .await?;
-    let next = records
-        .last()
-        .map(|r| r.ctx.as_str().to_owned())
-        .or(query.after);
+    let next = records.last().map(|r| r.ctx.as_str().to_owned());
     Ok(Json(ContextsResponse {
         contexts: records.into_iter().map(ContextResponse::from).collect(),
         next,
@@ -528,7 +538,7 @@ pub async fn events(
     ),
     security(("api_key" = []))
 )]
-pub async fn evidence(State(app): State<App>, Path(ctx): Path<String>) -> Reply<serde_json::Value> {
+pub async fn evidence(State(app): State<App>, Segment(ctx): Segment) -> Reply<serde_json::Value> {
     let ctx = context(&ctx)?;
     let bundle = decide(&app, move |ledger| Ok(ledger.evidence(&ctx)?))
         .await?
@@ -557,9 +567,10 @@ pub async fn healthz() -> Json<Health> {
     })
 }
 
-/// The process can reach its store. One check runs at a time; a second
-/// caller while one is in flight is told to come back, so that nobody can
-/// drain the pool through this door.
+/// The process can reach its store. Probes are coalesced: one check at a
+/// time, its answer shared with every probe that arrives meanwhile and
+/// for a moment after, so nobody can drain the store through this door
+/// and no probe fails for lack of a turn.
 #[utoipa::path(
     get, path = "/readyz", tag = "ops",
     responses(
@@ -568,39 +579,20 @@ pub async fn healthz() -> Json<Health> {
     )
 )]
 pub async fn readyz(State(app): State<App>) -> Response {
-    let not_ready = || {
-        (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(Health {
-                status: "not ready".to_owned(),
-            }),
-        )
-            .into_response()
-    };
-    let Ok(permit) = app.ready_permit().clone().try_acquire_owned() else {
-        return not_ready();
-    };
-    let checked = app.clone();
-    let check = tokio::task::spawn_blocking(move || {
-        let _held = permit;
-        checked.ready()
-    });
-    match tokio::time::timeout(READY_TIMEOUT, check).await {
-        Ok(Ok(Ok(()))) => Json(Health {
+    match app.readiness().await {
+        Ok(()) => Json(Health {
             status: "ok".to_owned(),
         })
         .into_response(),
-        Ok(Ok(Err(cause))) => {
+        Err(cause) => {
             tracing::warn!(%cause, "not ready");
-            not_ready()
-        }
-        Ok(Err(join)) => {
-            tracing::warn!(cause = %join, "not ready");
-            not_ready()
-        }
-        Err(_elapsed) => {
-            tracing::warn!("not ready: the store did not answer in time");
-            not_ready()
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(Health {
+                    status: "not ready".to_owned(),
+                }),
+            )
+                .into_response()
         }
     }
 }

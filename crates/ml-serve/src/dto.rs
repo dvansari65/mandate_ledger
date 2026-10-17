@@ -120,9 +120,14 @@ pub struct AuthorizeRequest {
 }
 
 impl AuthorizeRequest {
-    /// Check the bounds of what the engine would otherwise store verbatim.
+    /// Check the bounds of what the engine would otherwise store verbatim,
+    /// and of what the adapter would otherwise quote back.
     pub fn validate(&self) -> Result<(), ApiError> {
-        bounded("request_key", &self.request_key, MAX_ID_LEN)
+        bounded("request_key", &self.request_key, MAX_ID_LEN)?;
+        if let Some(attestation) = &self.cart.attestation {
+            bounded("cart.attestation.key_id", &attestation.key_id, MAX_ID_LEN)?;
+        }
+        Ok(())
     }
 }
 

@@ -5,7 +5,7 @@
 
 #![forbid(unsafe_code)]
 
-use ml_serve::Config;
+use ml_serve::{Config, LogFormat};
 use std::process::ExitCode;
 use tracing_subscriber::EnvFilter;
 
@@ -17,15 +17,14 @@ fn main() -> ExitCode {
             return ExitCode::from(64);
         }
     };
-    let filter = EnvFilter::try_from_env("ML_LOG").unwrap_or_else(|_| EnvFilter::new("info"));
-    let text = std::env::var("ML_LOG_FORMAT").is_ok_and(|f| f.eq_ignore_ascii_case("text"));
+    // Validated by `Config`; the fallback is unreachable.
+    let filter = EnvFilter::try_new(&config.log_filter).unwrap_or_else(|_| EnvFilter::new("info"));
     let subscriber = tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_writer(std::io::stderr);
-    if text {
-        subscriber.init();
-    } else {
-        subscriber.json().init();
+    match config.log_format {
+        LogFormat::Text => subscriber.init(),
+        LogFormat::Json => subscriber.json().init(),
     }
 
     let runtime = match tokio::runtime::Runtime::new() {
@@ -35,7 +34,22 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    match runtime.block_on(ml_serve::run(config)) {
+    let app = match runtime.block_on(ml_serve::assemble(&config)) {
+        Ok(app) => app,
+        Err(e) => {
+            tracing::error!(error = %e, "cannot start");
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let served = runtime.block_on(ml_serve::serve(&config, &app));
+    // Ledger calls still on blocking threads get the grace once more; then
+    // the runtime is gone, whatever they are doing, and so is the process.
+    runtime.shutdown_timeout(config.shutdown_grace);
+    // The last reference to the store goes here, on a thread no runtime
+    // owns: its connections block to close.
+    drop(app);
+    match served {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             tracing::error!(error = %e, "stopping");

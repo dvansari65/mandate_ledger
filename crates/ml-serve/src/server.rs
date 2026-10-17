@@ -1,5 +1,11 @@
-//! Assembling the service from a [`Config`] and running it until told to
+//! Assembling the service from a [`Config`], and running it until told to
 //! stop.
+//!
+//! The store is synchronous and its connections block to close, so the
+//! process has to let go of it outside the runtime: `main` builds the
+//! service with [`assemble`], runs [`serve`], shuts the runtime down with a
+//! deadline, and only then drops the [`App`]. A host that lives inside a
+//! runtime uses [`App::close`] instead.
 
 use crate::app::{App, AppOptions, Readiness};
 use crate::config::Config;
@@ -13,7 +19,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 use tokio::sync::watch;
 
-/// How long to keep trying to reach the database at boot.
+/// How long to keep trying to reach the database, at boot and at every
+/// checkout.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// How many `…-reorg` references the sandbox rail remembers.
@@ -59,17 +66,16 @@ impl r2d2::HandleError<postgres::Error> for LastError {
     }
 }
 
-/// Connect, size the pool, and bring the schema up to date.
-fn connect(url: &str, pool_size: u32) -> Result<PostgresStore, Error> {
-    let config: postgres::Config = url
-        .parse()
-        .map_err(|e| Error::Database(format!("bad URL: {e}")))?;
+/// A pool of at most `size` connections to `database`, keeping `idle` of
+/// them open (all of them, when `None`).
+fn pool(database: postgres::Config, size: u32, idle: Option<u32>) -> Result<PgPool, Error> {
     let last_error = Arc::new(Mutex::new(None));
-    let pool = r2d2::Pool::builder()
-        .max_size(pool_size)
+    r2d2::Pool::builder()
+        .max_size(size)
+        .min_idle(idle)
         .connection_timeout(CONNECT_TIMEOUT)
         .error_handler(Box::new(LastError(Arc::clone(&last_error))))
-        .build(PostgresConnectionManager::new(config, NoTls))
+        .build(PostgresConnectionManager::new(database, NoTls))
         .map_err(|e| {
             let cause = last_error
                 .lock()
@@ -77,18 +83,37 @@ fn connect(url: &str, pool_size: u32) -> Result<PostgresStore, Error> {
                 .take()
                 .unwrap_or_else(|| e.to_string());
             Error::Database(format!("cannot connect: {cause}"))
-        })?;
-    let store = PostgresStore::from_pool(pool);
+        })
+}
+
+/// The ledger's store over a pool of `pool_size`, its schema brought up to
+/// date, and a connection of its own for the readiness probe.
+///
+/// Every statement and every lock wait is bounded by `request_timeout` on
+/// the server side, so a wedged session cannot hold a permit — or a
+/// blocking thread — for longer than a request may take.
+fn connect(
+    mut database: postgres::Config,
+    pool_size: u32,
+    request_timeout: Duration,
+) -> Result<(PostgresStore, PgPool), Error> {
+    let ms = request_timeout.as_millis();
+    database.options(&format!("-c statement_timeout={ms} -c lock_timeout={ms}"));
+    let store = PostgresStore::from_pool(pool(database.clone(), pool_size, None)?);
     store
         .migrate()
         .map_err(|e| Error::Database(format!("cannot prepare the schema: {e}")))?;
-    Ok(store)
+    // Opened on demand, so an idle probe costs nothing; separate, so the
+    // probe neither competes with the ledger for a connection nor is
+    // starved by it.
+    let probe = pool(database, 1, Some(0))?;
+    Ok((store, probe))
 }
 
 /// `/readyz`: one round trip to the database.
-fn readiness(pool: PgPool) -> Readiness {
+fn readiness(probe: PgPool) -> Readiness {
     Box::new(move || {
-        let mut conn = pool.get().map_err(|e| e.to_string())?;
+        let mut conn = probe.get().map_err(|e| e.to_string())?;
         conn.simple_query("SELECT 1").map_err(|e| e.to_string())?;
         Ok(())
     })
@@ -119,25 +144,17 @@ async fn stop_signal() {
     }
 }
 
-/// Run the service until a stop signal, then give in-flight requests the
-/// configured grace and exit.
-pub async fn run(config: Config) -> Result<(), Error> {
-    let url = config.database_url.expose().clone();
-    let pool_size = config.db_pool;
-    let store = tokio::task::spawn_blocking(move || connect(&url, pool_size))
-        .await
-        .map_err(|e| Error::Startup(e.to_string()))??;
-    let app = assemble(&config, store);
-    // Whatever happens from here on, the store is let go of off the async
-    // thread: its connections block to close.
-    let served = serve(&config, &app).await;
-    app.close().await;
-    served
-}
-
-/// The service over `store`, as the configuration says.
-fn assemble(config: &Config, store: PostgresStore) -> App {
-    let ready = readiness(store.pool().clone());
+/// Connect, prepare the schema, and build the service as `config` says.
+///
+/// The returned [`App`] owns the store. Drop it off the async thread —
+/// after the runtime is gone, or through [`App::close`].
+pub async fn assemble(config: &Config) -> Result<App, Error> {
+    let database = config.database.expose().clone();
+    let (pool_size, request_timeout) = (config.db_pool, config.request_timeout);
+    let (store, probe) =
+        tokio::task::spawn_blocking(move || connect(database, pool_size, request_timeout))
+            .await
+            .map_err(|e| Error::Startup(e.to_string()))??;
 
     let rail = SandboxRail::new(
         config.rail_id.clone(),
@@ -160,23 +177,23 @@ fn assemble(config: &Config, store: PostgresStore) -> App {
             adapter.with_merchant_key(id.clone(), *key)
         });
     let ledger = Ledger::new(store, rail, signers, SystemClock);
-    App::new(
+    Ok(App::new(
         ledger,
         adapter,
         config.api_keys.clone(),
-        ready,
+        readiness(probe),
         config.evidence_key.as_ref().map(|k| k.expose().clone()),
         AppOptions {
             permits: usize::try_from(config.db_pool).unwrap_or(8),
             request_timeout: config.request_timeout,
             body_limit: config.body_limit,
         },
-    )
+    ))
 }
 
 /// Bind, serve until the stop signal, and give in-flight requests the
 /// configured grace.
-async fn serve(config: &Config, app: &App) -> Result<(), Error> {
+pub async fn serve(config: &Config, app: &App) -> Result<(), Error> {
     let listener = tokio::net::TcpListener::bind(config.listen)
         .await
         .map_err(|source| Error::Bind {

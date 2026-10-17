@@ -16,8 +16,11 @@
 //! header the service chose, which is the id in its logs.
 //!
 //! The crate is a library so that the service can be driven in-process by
-//! tests; the `ml-serve` binary reads a [`Config`] from the environment
-//! and calls [`run`].
+//! tests. The `ml-serve` binary reads a [`Config`] from the environment,
+//! builds the service with [`assemble`], runs [`serve`] until a stop
+//! signal, shuts its runtime down with a deadline, and only then drops the
+//! [`App`]: the store is synchronous and its connections block to close,
+//! so the last reference must go on a thread no runtime owns.
 
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
@@ -37,6 +40,6 @@ mod server;
 pub use app::{App, AppOptions, Readiness};
 pub use auth::{ApiKeys, MIN_KEY_LEN};
 pub use backend::Backend;
-pub use config::Config;
+pub use config::{Config, LogFormat};
 pub use openapi::spec;
-pub use server::{Error, run};
+pub use server::{Error, assemble, serve};

@@ -80,7 +80,9 @@ impl ApiKeys {
 fn bearer(request: &Request) -> Option<&[u8]> {
     let value = request.headers().get(AUTHORIZATION)?.as_bytes();
     let (scheme, token) = value.split_at_checked(7)?;
-    scheme.eq_ignore_ascii_case(b"bearer ").then_some(token)
+    scheme
+        .eq_ignore_ascii_case(b"bearer ")
+        .then_some(token.trim_ascii_start())
 }
 
 /// Refuse the request unless it carries an accepted key. On success the

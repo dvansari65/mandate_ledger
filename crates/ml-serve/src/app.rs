@@ -11,8 +11,8 @@ use http::HeaderValue;
 use http::header::{CACHE_CONTROL, X_CONTENT_TYPE_OPTIONS};
 use ml_adapters::NativeCartAdapter;
 use ml_core::SigningKey;
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::{Duration, Instant};
 use tokio::sync::Semaphore;
 use tower::ServiceBuilder;
 use tower_http::catch_panic::CatchPanicLayer;
@@ -20,6 +20,10 @@ use tower_http::set_header::SetResponseHeaderLayer;
 
 /// Whether the store can be reached right now.
 pub type Readiness = Box<dyn Fn() -> Result<(), String> + Send + Sync>;
+
+/// How long a readiness check may take, and how long its answer is reused.
+const READY_TIMEOUT: Duration = Duration::from_secs(2);
+const READY_CACHE: Duration = Duration::from_secs(1);
 
 /// The limits a deployment chooses.
 #[derive(Clone, Copy, Debug)]
@@ -43,14 +47,40 @@ impl Default for AppOptions {
     }
 }
 
+/// `/readyz`, coalesced: one check in flight at a time, its answer shared
+/// with everyone asking meanwhile and for a moment after. A stream of
+/// probes, honest or not, costs one database round trip a second, and no
+/// probe fails for lack of a turn.
+struct Probe {
+    check: Readiness,
+    permit: Semaphore,
+    last: Mutex<Option<(Instant, Result<(), String>)>>,
+}
+
+impl Probe {
+    /// The last answer, if it is recent enough to stand.
+    fn cached(&self) -> Option<Result<(), String>> {
+        self.last
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .filter(|(at, _)| at.elapsed() < READY_CACHE)
+            .map(|(_, answer)| answer.clone())
+    }
+
+    fn remember(&self, answer: &Result<(), String>) {
+        *self.last.lock().unwrap_or_else(PoisonError::into_inner) =
+            Some((Instant::now(), answer.clone()));
+    }
+}
+
 struct Inner {
     backend: Arc<dyn Backend>,
     adapter: NativeCartAdapter,
     keys: ApiKeys,
     evidence_key: Option<SigningKey>,
     permits: Arc<Semaphore>,
-    ready_permit: Arc<Semaphore>,
-    readiness: Readiness,
+    probe: Probe,
     options: AppOptions,
 }
 
@@ -77,8 +107,11 @@ impl App {
             keys,
             evidence_key,
             permits: Arc::new(Semaphore::new(options.permits.max(1))),
-            ready_permit: Arc::new(Semaphore::new(1)),
-            readiness,
+            probe: Probe {
+                check: readiness,
+                permit: Semaphore::new(1),
+                last: Mutex::new(None),
+            },
             options,
         }))
     }
@@ -103,16 +136,38 @@ impl App {
         &self.0.permits
     }
 
-    pub(crate) fn ready_permit(&self) -> &Arc<Semaphore> {
-        &self.0.ready_permit
-    }
-
-    pub(crate) fn ready(&self) -> Result<(), String> {
-        (self.0.readiness)()
-    }
-
     pub(crate) fn options(&self) -> &AppOptions {
         &self.0.options
+    }
+
+    /// Whether the store can be reached: the recent answer if there is
+    /// one, else one check, shared with every probe that arrives while it
+    /// runs.
+    pub(crate) async fn readiness(&self) -> Result<(), String> {
+        let probe = &self.0.probe;
+        if let Some(answer) = probe.cached() {
+            return answer;
+        }
+        let permit = match tokio::time::timeout(READY_TIMEOUT, probe.permit.acquire()).await {
+            Ok(Ok(permit)) => permit,
+            Ok(Err(_closed)) => return Err("the probe is closed".to_owned()),
+            Err(_elapsed) => return Err("a check is still running".to_owned()),
+        };
+        // The check waited for may have answered meanwhile.
+        if let Some(answer) = probe.cached() {
+            drop(permit);
+            return answer;
+        }
+        let app = self.clone();
+        let check = tokio::task::spawn_blocking(move || (app.0.probe.check)());
+        let answer = match tokio::time::timeout(READY_TIMEOUT, check).await {
+            Ok(Ok(answer)) => answer,
+            Ok(Err(join)) => Err(format!("the check failed: {join}")),
+            Err(_elapsed) => Err("the store did not answer in time".to_owned()),
+        };
+        probe.remember(&answer);
+        drop(permit);
+        answer
     }
 
     /// Let go of the service off the async thread.
@@ -145,6 +200,9 @@ impl App {
                 post(handlers::revocation),
             )
             .route("/v1/events", get(handlers::events))
+            // Inside the key check: a wrong method on a protected route must
+            // not tell anyone without a key that the route exists.
+            .method_not_allowed_fallback(handlers::method_not_allowed)
             .route_layer(middleware::from_fn_with_state(
                 self.clone(),
                 auth::require_key,
