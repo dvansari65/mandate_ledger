@@ -38,15 +38,19 @@ mandate, the cart, the proof and the finality disagree, and records why.
       a field is not a breaking change
 
 ### 4. The service and the SDK — the adoption path
-- [ ] `ml serve`: the five calls over HTTP; status codes mirror the exit codes
-      (200 allowed, 409 refused with the code, 503 could not decide); request
-      keys; a finality webhook; health and readiness; structured logs and
-      metrics; graceful shutdown; configuration from the environment; OpenAPI
+- [x] `ml-serve`: the five calls over HTTP; status codes mirror the exit
+      codes (200 allowed, 409 refused with the code, 503 could not decide);
+      request keys; health and readiness; structured logs; graceful
+      shutdown; configuration from the environment; OpenAPI
+- [ ] Metrics; per-key rate limits — the admission control that bounds
+      refusal flooding of new contexts (B5); the finality webhook, once a
+      rail has something to call it with
 - [ ] Docker image and `compose.yaml` with PostgreSQL
 - [ ] A TypeScript SDK generated from the OpenAPI spec, with the refusal
       codes as a typed union, and a Node example
-- Decisions to make first: auth model (API key or mTLS), threading behind a
-  synchronous store, one ledger per deployment
+- Decided: API keys, with mTLS as a later option; the synchronous store
+  behind blocking threads with as many permits as the pool has
+  connections; one ledger per deployment
 
 ### 5. The first real adapter: x402
 - [ ] 402 terms → cart (`payTo` as the merchant, so §2's payee binding first)
@@ -68,8 +72,9 @@ and rotation with validity windows, a signed revocation list verifiable
 offline, evidence redaction for third parties.
 
 ### 8. Operability
-Retention for `ml_authorizations`, index review under load, backup and
-restore guidance, pool sizing, published benchmarks, a multi-rail registry.
+TLS to PostgreSQL (the store's pool is plaintext), retention for
+`ml_authorizations`, index review under load, backup and restore guidance,
+pool sizing, published benchmarks, a multi-rail registry.
 
 ### 9. Assurance, before 1.0
 Fuzzing the adapters, property tests that the PostgreSQL store is

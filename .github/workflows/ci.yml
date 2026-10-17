@@ -94,7 +94,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: cargo test -p ml-store-postgres -p ml-sandbox
+      - run: cargo test -p ml-store-postgres -p ml-sandbox -p ml-serve
 
   scenarios:
     # The eight threat-model scenarios, driving the `ml` binary one process

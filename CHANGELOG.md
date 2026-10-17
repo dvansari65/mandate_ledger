@@ -41,5 +41,12 @@ git; the entry below describes what that release will contain.
   against PostgreSQL.
 - `SECURITY.md`, this changelog, a stability policy, a release process and
   crates.io metadata; the library crates deny missing documentation.
+- `ml-serve`, the engine as an HTTP service: the five calls, expiry and
+  revocation, the log and the contexts, signed evidence; `200` allowed,
+  `409` refused with the code, `503` could not decide; API keys compared
+  in constant time; load shed past the pool's permits; structured logs;
+  graceful shutdown; configuration from the environment; an OpenAPI
+  document generated from the code. The sandbox rail lives in
+  `ml-adapters`, so that `ml` and the service share it.
 
 [Unreleased]: https://github.com/dvansari65/mandate_ledger/commits/main

@@ -90,6 +90,15 @@ are added, not removed. The human-readable output is not a contract. `ml`
 is not published to crates.io; the scripts in `scenarios/` are its contract
 test.
 
+## The service
+
+The status codes of `ml-serve` mean what [`service.md`](service.md) says
+they mean, and a refusal body carries the same `code`, `stage`, `detail`,
+`ctx` and `recorded` as the `ml` command's report. Existing paths and keys
+keep their names and types; keys are added, not removed. Request bodies
+refuse unknown fields, so a new field is never ignored by an older
+service: a client sends what the version it targets accepts.
+
 ## The Rust API
 
 Semantic versioning, as read above. Beyond that:

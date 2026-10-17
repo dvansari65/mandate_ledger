@@ -34,10 +34,18 @@ On a branch off `main`:
    git grep -n '0\.0\.1' -- ':!Cargo.lock' ':!site/pnpm-lock.yaml' ':!.claude'
    ```
 
-3. In `CHANGELOG.md`, rename *Unreleased* to `[x.y.z] — YYYY-MM-DD`, add a
+3. Regenerate the service's OpenAPI document, which embeds the version:
+
+   ```bash
+   ML_WRITE_OPENAPI=1 cargo test -p ml-serve --test openapi
+   ```
+
+   A test fails on a stale `crates/ml-serve/openapi.json`, so a release
+   that skips this step stops in CI.
+4. In `CHANGELOG.md`, rename *Unreleased* to `[x.y.z] — YYYY-MM-DD`, add a
    fresh empty *Unreleased* above it, and update the link definitions at
    the bottom.
-4. Commit, then run the whole release short of the upload:
+5. Commit, then run the whole release short of the upload:
 
    ```bash
    cargo +stable publish --workspace --dry-run
@@ -47,7 +55,7 @@ On a branch off `main`:
    others resolved from the same set, and stops at the upload. It refuses
    an uncommitted tree, and that is the point: what it checks is what the
    commit publishes. Fix anything it finds, amend, run it again.
-5. Open the pull request, let CI finish, merge.
+6. Open the pull request, let CI finish, merge.
 
 ## Ship it
 

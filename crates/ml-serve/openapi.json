@@ -1,0 +1,1648 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "mandate-ledger",
+    "description": "The five calls over HTTP. `200`: allowed. `409`: refused, with the code. `503`: could not decide — read the context back, then retry. Every call is safe to repeat: a retry is the same purchase, and gets the same answer.",
+    "license": {
+      "name": "Apache-2.0"
+    },
+    "version": "0.0.1"
+  },
+  "paths": {
+    "/healthz": {
+      "get": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "The process is up.",
+        "operationId": "healthz",
+        "responses": {
+          "200": {
+            "description": "Up",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/readyz": {
+      "get": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "The process can reach its store. Probes are coalesced: one check at a\ntime, its answer shared with every probe that arrives meanwhile and\nfor a moment after, so nobody can drain the store through this door\nand no probe fails for lack of a turn.",
+        "operationId": "readyz",
+        "responses": {
+          "200": {
+            "description": "Ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Not ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/authorizations": {
+      "post": {
+        "tags": [
+          "lifecycle"
+        ],
+        "summary": "Check a cart against a mandate and reserve its total.",
+        "operationId": "authorize",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthorizeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Authorized; the context id is the handle for every later step",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorizedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not a request the ledger can be asked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Could not decide; read the context back, then retry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ]
+      }
+    },
+    "/v1/contexts": {
+      "get": {
+        "tags": [
+          "read"
+        ],
+        "summary": "Where every context stands, a page at a time.",
+        "operationId": "contexts",
+        "parameters": [
+          {
+            "name": "mandate",
+            "in": "path",
+            "description": "Only contexts authorized under this mandate.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "state",
+            "in": "path",
+            "description": "Only contexts in this state.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "after",
+            "in": "path",
+            "description": "Start just after this context id. The response's `next` is the\nvalue to pass to read the contexts after it.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "path",
+            "description": "At most this many, in byte order of their ids. Default 50, at most 500.",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of contexts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not a query the store can be asked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The store was unavailable; retry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ]
+      }
+    },
+    "/v1/contexts/{ctx}": {
+      "get": {
+        "tags": [
+          "read"
+        ],
+        "summary": "Where a context stands now.",
+        "operationId": "context_status",
+        "parameters": [
+          {
+            "name": "ctx",
+            "in": "path",
+            "description": "The context, from authorize",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The context",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not a context id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such context",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The store was unavailable; retry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ]
+      }
+    },
+    "/v1/contexts/{ctx}/compensation": {
+      "post": {
+        "tags": [
+          "lifecycle"
+        ],
+        "summary": "Record that the host undid its side effects after a failed settlement.",
+        "operationId": "compensation",
+        "parameters": [
+          {
+            "name": "ctx",
+            "in": "path",
+            "description": "The context, from authorize",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompensationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Compensated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompensatedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not a request the ledger can be asked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Could not decide; read the context back, then retry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ]
+      }
+    },
+    "/v1/contexts/{ctx}/delivery": {
+      "post": {
+        "tags": [
+          "lifecycle"
+        ],
+        "summary": "Record fulfilment of a settled context.",
+        "operationId": "delivery",
+        "parameters": [
+          {
+            "name": "ctx",
+            "in": "path",
+            "description": "The context, from authorize",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeliveryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Delivered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveredResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not a request the ledger can be asked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Could not decide; read the context back, then retry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ]
+      }
+    },
+    "/v1/contexts/{ctx}/evidence": {
+      "get": {
+        "tags": [
+          "read"
+        ],
+        "summary": "A context's chain as a bundle anyone can verify without this service:\nsigned by the service's evidence key when it has one, bare otherwise.\nEither form is what `ml verify` reads.",
+        "operationId": "evidence",
+        "parameters": [
+          {
+            "name": "ctx",
+            "in": "path",
+            "description": "The context, from authorize",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The bundle, or the signed bundle",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not a context id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such context",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The store was unavailable; retry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ]
+      }
+    },
+    "/v1/contexts/{ctx}/expiry": {
+      "post": {
+        "tags": [
+          "lifecycle"
+        ],
+        "summary": "Release an authorization that will not be paid.",
+        "operationId": "expiry",
+        "parameters": [
+          {
+            "name": "ctx",
+            "in": "path",
+            "description": "The context, from authorize",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Expired; the reservation is released",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExpiredResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not a request the ledger can be asked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Could not decide; read the context back, then retry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ]
+      }
+    },
+    "/v1/contexts/{ctx}/payment": {
+      "post": {
+        "tags": [
+          "lifecycle"
+        ],
+        "summary": "Record a payment proof against an authorized context.",
+        "operationId": "payment",
+        "parameters": [
+          {
+            "name": "ctx",
+            "in": "path",
+            "description": "The context, from authorize",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaymentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Paid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaidResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not a request the ledger can be asked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Could not decide; read the context back, then retry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ]
+      }
+    },
+    "/v1/contexts/{ctx}/settlement": {
+      "post": {
+        "tags": [
+          "lifecycle"
+        ],
+        "summary": "Ask the rail whether a recorded payment is final.",
+        "operationId": "settlement",
+        "parameters": [
+          {
+            "name": "ctx",
+            "in": "path",
+            "description": "The context, from authorize",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettlementRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Settled, pending, or failed — each a decision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettlementResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not a request the ledger can be asked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Could not decide; read the context back, then retry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ]
+      }
+    },
+    "/v1/events": {
+      "get": {
+        "tags": [
+          "read"
+        ],
+        "summary": "What happened: every event in every context, in commit order,\nrefusals included.",
+        "operationId": "events",
+        "parameters": [
+          {
+            "name": "after",
+            "in": "path",
+            "description": "Start just after this sequence number. Without it, the most recent\nevents. The response's `next` is the value to pass to read what\ncame after; `limit=0` gives `next` alone, which is where \"now\" is.",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "path",
+            "description": "At most this many events. Default 50, at most 500.",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of the log",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not a query the store can be asked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The store was unavailable; retry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ]
+      }
+    },
+    "/v1/mandates/{mandate}/revocation": {
+      "post": {
+        "tags": [
+          "lifecycle"
+        ],
+        "summary": "Withdraw a mandate: every later authorization under it is refused.\nContexts already authorized are unaffected.",
+        "operationId": "revocation",
+        "parameters": [
+          {
+            "name": "mandate",
+            "in": "path",
+            "description": "The mandate id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevokedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not a request the ledger can be asked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Could not decide; retry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AttestationBody": {
+        "type": "object",
+        "description": "A merchant's signature over a cart, under a key id the service knows.",
+        "required": [
+          "key_id",
+          "signature"
+        ],
+        "properties": {
+          "key_id": {
+            "type": "string",
+            "description": "Which merchant key signed."
+          },
+          "signature": {
+            "type": "string",
+            "description": "The Ed25519 signature, hex."
+          }
+        },
+        "additionalProperties": false
+      },
+      "AuthorizeRequest": {
+        "type": "object",
+        "description": "A request to authorize a cart under a mandate.",
+        "required": [
+          "mandate",
+          "cart",
+          "request_key"
+        ],
+        "properties": {
+          "cart": {
+            "$ref": "#/components/schemas/CartBody",
+            "description": "The cart."
+          },
+          "mandate": {
+            "type": "object",
+            "description": "The signed mandate, exactly as the wallet issued it."
+          },
+          "request_key": {
+            "type": "string",
+            "description": "The caller's key for this purchase attempt. The same key with the\nsame mandate and cart is the same purchase, and gets the same answer.",
+            "example": "order-8831"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AuthorizedResponse": {
+        "type": "object",
+        "description": "The `Authorized` token's facts.",
+        "required": [
+          "ctx",
+          "state",
+          "mandate",
+          "merchant",
+          "amount",
+          "cart_hash"
+        ],
+        "properties": {
+          "amount": {
+            "$ref": "#/components/schemas/MoneyBody",
+            "description": "The amount reserved."
+          },
+          "cart_hash": {
+            "type": "string",
+            "description": "The hash of the cart as authorized."
+          },
+          "ctx": {
+            "type": "string",
+            "description": "The context id: the handle for every later step."
+          },
+          "mandate": {
+            "type": "string",
+            "description": "The mandate the context was authorized under."
+          },
+          "merchant": {
+            "type": "string",
+            "description": "The merchant that will be paid."
+          },
+          "state": {
+            "$ref": "#/components/schemas/StepState",
+            "description": "`authorized`."
+          }
+        }
+      },
+      "CartBody": {
+        "type": "object",
+        "description": "A cart in the native format: what the agent wants to buy, from whom,\nfor how much.",
+        "required": [
+          "merchant",
+          "total"
+        ],
+        "properties": {
+          "attestation": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AttestationBody",
+                "description": "The merchant's signature over everything else."
+              }
+            ]
+          },
+          "category": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A purchase category, if the merchant states one."
+          },
+          "items": {
+            "type": "array",
+            "items": {},
+            "description": "Line items, any JSON. Hashed, never interpreted."
+          },
+          "merchant": {
+            "type": "string",
+            "description": "The merchant: a domain or a DID. Lower-cased on the way in.",
+            "example": "bigbasket.com"
+          },
+          "total": {
+            "$ref": "#/components/schemas/MoneyBody",
+            "description": "The total."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CompensatedResponse": {
+        "type": "object",
+        "description": "The `Compensated` token's facts.",
+        "required": [
+          "ctx",
+          "state"
+        ],
+        "properties": {
+          "ctx": {
+            "type": "string",
+            "description": "The context."
+          },
+          "state": {
+            "$ref": "#/components/schemas/StepState",
+            "description": "`compensated`."
+          }
+        }
+      },
+      "CompensationRequest": {
+        "type": "object",
+        "description": "A request to record compensation.",
+        "properties": {
+          "reference": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The host's reference for the compensation — a refund id."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ContextResponse": {
+        "type": "object",
+        "description": "Where a context stands now.",
+        "required": [
+          "ctx",
+          "state",
+          "mandate",
+          "cart_hash",
+          "merchant",
+          "amount"
+        ],
+        "properties": {
+          "amount": {
+            "$ref": "#/components/schemas/MoneyBody",
+            "description": "The amount reserved at authorization."
+          },
+          "cart_hash": {
+            "type": "string",
+            "description": "The cart hash bound at authorization."
+          },
+          "ctx": {
+            "type": "string",
+            "description": "The context."
+          },
+          "failure_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why settlement failed, once it has."
+          },
+          "idempotency_key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The payment's idempotency key, once paid."
+          },
+          "mandate": {
+            "type": "string",
+            "description": "The mandate it was authorized under."
+          },
+          "merchant": {
+            "type": "string",
+            "description": "The merchant bound at authorization."
+          },
+          "payment_reference": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The rail's payment reference, once paid."
+          },
+          "rail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The rail that recorded payment, once paid."
+          },
+          "receipt_reference": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The receipt reference, once delivered."
+          },
+          "settlement_reference": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The settlement reference, once settled."
+          },
+          "state": {
+            "$ref": "#/components/schemas/StepState",
+            "description": "Its state."
+          }
+        }
+      },
+      "ContextsResponse": {
+        "type": "object",
+        "description": "A page of contexts.",
+        "required": [
+          "contexts"
+        ],
+        "properties": {
+          "contexts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContextResponse"
+            },
+            "description": "The contexts, in byte order of their ids."
+          },
+          "next": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The cursor for the page after this one, or null when nothing was listed."
+          }
+        }
+      },
+      "DeliveredResponse": {
+        "type": "object",
+        "description": "The `Delivered` token's facts.",
+        "required": [
+          "ctx",
+          "state",
+          "receipt"
+        ],
+        "properties": {
+          "ctx": {
+            "type": "string",
+            "description": "The context."
+          },
+          "receipt": {
+            "type": "string",
+            "description": "The receipt reference as recorded."
+          },
+          "state": {
+            "$ref": "#/components/schemas/StepState",
+            "description": "`delivered`."
+          }
+        }
+      },
+      "DeliveryRequest": {
+        "type": "object",
+        "description": "A request to record delivery.",
+        "required": [
+          "receipt"
+        ],
+        "properties": {
+          "receipt": {
+            "$ref": "#/components/schemas/ReceiptBody",
+            "description": "The receipt."
+          }
+        },
+        "additionalProperties": false
+      },
+      "EventsResponse": {
+        "type": "object",
+        "description": "A page of the log.",
+        "required": [
+          "events",
+          "next"
+        ],
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "Events in commit order, each as it appears in an evidence bundle."
+          },
+          "next": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The cursor for the page after this one.",
+            "minimum": 0
+          }
+        }
+      },
+      "ExpiredResponse": {
+        "type": "object",
+        "description": "An expired authorization.",
+        "required": [
+          "ctx",
+          "state"
+        ],
+        "properties": {
+          "ctx": {
+            "type": "string",
+            "description": "The context."
+          },
+          "state": {
+            "$ref": "#/components/schemas/StepState",
+            "description": "`expired`."
+          }
+        }
+      },
+      "FinalityBody": {
+        "type": "object",
+        "description": "Finality evidence for the sandbox rail: which payment, and, if the\ncaller speaks for the rail, what it reports. With neither\n`confirmations` nor `failed`, the rail answers from the reference:\n`…-ok` is final, `…-fail` failed, `…-reorg` gains a confirmation per\ncheck and is then dropped.",
+        "properties": {
+          "confirmations": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The rail reports this many confirmations.",
+            "minimum": 0
+          },
+          "failed": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The rail reports the payment failed, for this reason."
+          },
+          "reference": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The payment the evidence is about. Defaults to the one recorded."
+          }
+        },
+        "additionalProperties": false
+      },
+      "Health": {
+        "type": "object",
+        "description": "Liveness or readiness.",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "`ok`, or `not ready`."
+          }
+        }
+      },
+      "MoneyBody": {
+        "type": "object",
+        "description": "An amount of money.",
+        "required": [
+          "amount",
+          "currency"
+        ],
+        "properties": {
+          "amount": {
+            "type": "string",
+            "description": "A decimal, as a string. Never a float.",
+            "example": "128.00"
+          },
+          "currency": {
+            "type": "string",
+            "description": "An ISO 4217 code or a token symbol.",
+            "example": "INR"
+          }
+        },
+        "additionalProperties": false
+      },
+      "PaidResponse": {
+        "type": "object",
+        "description": "The `Paid` token's facts.",
+        "required": [
+          "ctx",
+          "state",
+          "rail",
+          "reference",
+          "idempotency_key"
+        ],
+        "properties": {
+          "ctx": {
+            "type": "string",
+            "description": "The context."
+          },
+          "idempotency_key": {
+            "type": "string",
+            "description": "`H(ctx ‖ rail ‖ nonce)`: the key under which this payment is unique."
+          },
+          "rail": {
+            "type": "string",
+            "description": "The rail that verified the proof."
+          },
+          "reference": {
+            "type": "string",
+            "description": "The rail's reference for the payment."
+          },
+          "state": {
+            "$ref": "#/components/schemas/StepState",
+            "description": "`paid`."
+          }
+        }
+      },
+      "PaymentRequest": {
+        "type": "object",
+        "description": "A request to record a payment.",
+        "required": [
+          "proof"
+        ],
+        "properties": {
+          "proof": {
+            "$ref": "#/components/schemas/ProofBody",
+            "description": "The proof."
+          }
+        },
+        "additionalProperties": false
+      },
+      "Problem": {
+        "type": "object",
+        "description": "Anything that went wrong other than a refusal.",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "What went wrong, for people."
+          }
+        }
+      },
+      "ProofBody": {
+        "type": "object",
+        "description": "A payment proof for the sandbox rail. Every knob a real rail would\ndecide for itself is a field here, which is how the threat-model\nscenarios present a replayed nonce, a swapped cart or a redirected payee.",
+        "required": [
+          "reference",
+          "amount"
+        ],
+        "properties": {
+          "amount": {
+            "$ref": "#/components/schemas/MoneyBody",
+            "description": "The amount the proof is for."
+          },
+          "bound_cart": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A cart hash the proof is bound to, `sha256:…`."
+          },
+          "bound_merchant": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The merchant the proof pays."
+          },
+          "nonce": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The single-use nonce the rail guarantees. Defaults to the reference."
+          },
+          "reference": {
+            "type": "string",
+            "description": "The rail's reference for the payment."
+          },
+          "unbound": {
+            "type": "boolean",
+            "description": "Do not bind the proof to the context."
+          },
+          "valid": {
+            "type": "boolean",
+            "description": "Whether the proof's signature verifies. Defaults to true."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReceiptBody": {
+        "type": "object",
+        "description": "A delivery receipt.",
+        "required": [
+          "reference"
+        ],
+        "properties": {
+          "reference": {
+            "type": "string",
+            "description": "The merchant's fulfilment reference — an order id, a tracking number."
+          },
+          "signed_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The merchant key id that vouches for the receipt. Without it, the\nreceipt is agent-reported."
+          }
+        },
+        "additionalProperties": false
+      },
+      "Refusal": {
+        "type": "object",
+        "description": "A refusal: the ledger's decision, with its code.",
+        "required": [
+          "code",
+          "stage",
+          "detail",
+          "ctx",
+          "recorded"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "The machine-readable code. Stable; see `docs/stability.md`.",
+            "example": "SCOPE_MERCHANT_MISMATCH"
+          },
+          "ctx": {
+            "type": "string",
+            "description": "The context the refusal was decided under."
+          },
+          "detail": {
+            "type": "string",
+            "description": "Why, for people. Never parse it."
+          },
+          "recorded": {
+            "type": "boolean",
+            "description": "Whether the refusal was written to the context's chain. False once\nthe chain holds its cap of refusals; the decision is the same."
+          },
+          "stage": {
+            "type": "string",
+            "description": "Which step refused.",
+            "example": "authorize"
+          }
+        }
+      },
+      "RevokedResponse": {
+        "type": "object",
+        "description": "A revoked mandate.",
+        "required": [
+          "mandate",
+          "revoked"
+        ],
+        "properties": {
+          "mandate": {
+            "type": "string",
+            "description": "The mandate."
+          },
+          "revoked": {
+            "type": "boolean",
+            "description": "Always true: every later authorization under it is refused."
+          }
+        }
+      },
+      "SettlementRequest": {
+        "type": "object",
+        "description": "A request to record settlement.",
+        "required": [
+          "finality"
+        ],
+        "properties": {
+          "finality": {
+            "$ref": "#/components/schemas/FinalityBody",
+            "description": "The finality evidence."
+          }
+        },
+        "additionalProperties": false
+      },
+      "SettlementResponse": {
+        "type": "object",
+        "description": "What the rail said about finality.",
+        "required": [
+          "ctx",
+          "state"
+        ],
+        "properties": {
+          "ctx": {
+            "type": "string",
+            "description": "The context."
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What is outstanding, or why it failed."
+          },
+          "reference": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The settlement reference, once settled."
+          },
+          "state": {
+            "$ref": "#/components/schemas/StepState",
+            "description": "`settled`, `pending` or `settlement_failed`."
+          }
+        }
+      },
+      "StepState": {
+        "type": "string",
+        "description": "Where a step left the context. `pending` is only ever a settlement's\nanswer: not final yet, nothing changed, ask again later.",
+        "enum": [
+          "authorized",
+          "paid",
+          "settled",
+          "pending",
+          "settlement_failed",
+          "compensated",
+          "delivered",
+          "expired"
+        ]
+      }
+    },
+    "securitySchemes": {
+      "api_key": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "An API key from ML_API_KEYS"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "lifecycle",
+      "description": "The five calls, plus expiry and revocation."
+    },
+    {
+      "name": "read",
+      "description": "Where contexts stand, and what happened, with cursors."
+    },
+    {
+      "name": "ops",
+      "description": "Liveness and readiness. No key needed."
+    }
+  ]
+}

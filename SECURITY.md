@@ -34,7 +34,9 @@ In scope is anything that defeats a guarantee the engine makes:
   concurrency or across a restart, in `MemoryStore` or `PostgresStore`;
 - an evidence bundle that verifies after it was altered, or a signature —
   mandate, merchant cart, exporter — that verifies when it should not;
-- a bound in section B of the threat model that does not hold.
+- a bound in section B of the threat model that does not hold;
+- a request the service answers without an accepted API key, or a limit
+  it fails to enforce.
 
 Out of scope, by design — section C of the threat model: prompt injection,
 counterfeit storefronts, stolen agent or wallet keys, a merchant that does

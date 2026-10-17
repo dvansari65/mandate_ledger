@@ -6,6 +6,7 @@ members = [
     "crates/ml-store-postgres",
     "crates/ml-verify",
     "crates/ml-sandbox",
+    "crates/ml-serve",
     "examples/quickstart",
 ]
 
@@ -39,6 +40,18 @@ thiserror = "2"
 proptest = "1"
 clap = { version = "4", features = ["derive", "env"] }
 getrandom = "0.4"
+
+# The service's HTTP stack. utoipa stays on 5: 6 needs Rust 1.88.
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time"] }
+tower = "0.5"
+tower-http = { version = "0.7", features = ["catch-panic", "set-header"] }
+http = "1"
+http-body-util = "0.1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+utoipa = { version = "5", features = ["axum_extras"] }
+subtle = "2"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
