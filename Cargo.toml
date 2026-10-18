@@ -50,7 +50,7 @@ http = "1"
 http-body-util = "0.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-utoipa = { version = "5", features = ["axum_extras"] }
+utoipa = { version = "6", features = ["axum_extras"] }
 subtle = "2"
 
 [workspace.lints.rust]
