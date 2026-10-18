@@ -53,7 +53,8 @@ mandate, the cart, the proof and the finality disagree, and records why.
   connections; one ledger per deployment
 
 ### 5. The first real adapter: x402
-- [ ] 402 terms → cart (`payTo` as the merchant, so §2's payee binding first)
+- [x] 402 terms → cart (`payTo` as the merchant, so §2's payee binding first):
+      `X402CartAdapter` and the asset registry, pinned to x402 v2
 - [ ] Signed payment payload → proof (its nonce, the terms hash, `payTo`)
 - [ ] Chain receipt → finality; one rail id per network
 - [ ] The eight scenarios through x402 payloads, plus spec test vectors

@@ -41,6 +41,13 @@ git; the entry below describes what that release will contain.
   against PostgreSQL.
 - `SECURITY.md`, this changelog, a stability policy, a release process and
   crates.io metadata; the library crates deny missing documentation.
+- `X402CartAdapter`: an x402 v2 cart — the resource and the accepted
+  payment requirement — priced through an `AssetRegistry` of known tokens
+  (USDC on Base, and separately on Base Sepolia); the merchant is the
+  payee as a CAIP-10 account id, so a mandate names the chain it pays on;
+  the amount is exact in the token's decimals; addresses are checked
+  against their EIP-55 checksum; and anything the adapter does not price
+  is refused before the engine sees it.
 - `ml-serve`, the engine as an HTTP service: the five calls, expiry and
   revocation, the log and the contexts, signed evidence; `200` allowed,
   `409` refused with the code, `503` could not decide; API keys compared

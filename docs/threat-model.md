@@ -15,9 +15,9 @@ Properties P1–P18 are from "A Formal Analysis of Agent Payment Protocols" (arX
 | A6  | Budget overrun under concurrency    | P8      | reservation ledger, compare-and-swap |
 | A7  | Out-of-scope purchase               | P14     | `cart.claims ⊆ mandate.scope` |
 | A8  | Revoked / expired mandate           | P17     | registry + signed revocation list, offline verifiable |
-| A9  | Unsigned terms / amount tampering   | P18     | adapter rejects unsigned terms; merchant key pinning |
+| A9  | Unsigned terms / amount tampering   | P18     | native carts: a signed cart must verify against a pinned merchant key, and a mandate can require `merchant_signed`. x402 signs no terms: its carts are `agent_reported`, and the terms are bound instead by the payment the rail verifies — payee, amount and binding nonce (x402 rail: next) |
 | A10 | Redirect / facilitator impersonation| P18     | proof's payee must be the authorized merchant (`MERCHANT_BINDING_MISMATCH`); allowlist + key pinning |
-| A11 | HTTP 402 confusion                  | —       | strict schema validation; malformed = no payment |
+| A11 | HTTP 402 confusion                  | —       | strict schema validation; malformed = no payment. `X402CartAdapter` refuses anything but x402 v2 `exact` on a known `eip155` chain and asset |
 | A12 | Denial-of-settlement                | P13     | reserve settlement capacity before execution |
 | A13 | Validity-window expiry              | —       | refuse if `expires_at - now < settlement_p99` |
 | A14 | Cross-stage identity mismatch       | P7, P15 | single `InvocationContext` id; a replayed `authorize` must present the mandate the context was authorized under (`CONTEXT_MISMATCH`) |
