@@ -17,7 +17,7 @@ Properties P1–P18 are from "A Formal Analysis of Agent Payment Protocols" (arX
 | A8  | Revoked / expired mandate           | P17     | registry + signed revocation list, offline verifiable |
 | A9  | Unsigned terms / amount tampering   | P18     | adapter rejects unsigned terms; merchant key pinning |
 | A10 | Redirect / facilitator impersonation| P18     | proof's payee must be the authorized merchant (`MERCHANT_BINDING_MISMATCH`); allowlist + key pinning |
-| A11 | HTTP 402 confusion                  | —       | strict schema validation; malformed = no payment |
+| A11 | HTTP 402 confusion                  | —       | strict schema validation; malformed = no payment. `X402CartAdapter` refuses anything but x402 v2 `exact` on a known `eip155` chain and asset |
 | A12 | Denial-of-settlement                | P13     | reserve settlement capacity before execution |
 | A13 | Validity-window expiry              | —       | refuse if `expires_at - now < settlement_p99` |
 | A14 | Cross-stage identity mismatch       | P7, P15 | single `InvocationContext` id; a replayed `authorize` must present the mandate the context was authorized under (`CONTEXT_MISMATCH`) |

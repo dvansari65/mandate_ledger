@@ -10,9 +10,11 @@
 //! - [`sandbox`] — a rail the operator drives: told what to report, or
 //!   answering from the payment reference. For sandboxes; never for
 //!   production.
+//! - [`x402`] — the x402 v2 protocol: a cart from a 402's payment
+//!   requirements, priced through a registry of known assets. The rail is
+//!   next.
 //!
-//! Protocol adapters (x402, AP2, ACP, MPP) will live here as they land, one
-//! module each, behind feature flags.
+//! AP2, ACP and MPP will live here as they land, one module each.
 
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
@@ -20,7 +22,9 @@
 pub mod mock;
 pub mod native;
 pub mod sandbox;
+pub mod x402;
 
 pub use mock::{MockFinality, MockProof, MockRail};
 pub use native::{NativeAttestation, NativeCart, NativeCartAdapter};
 pub use sandbox::SandboxRail;
+pub use x402::X402CartAdapter;

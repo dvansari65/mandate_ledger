@@ -770,6 +770,7 @@ dependencies = [
  "ed25519-dalek",
  "hex",
  "ml-core",
+ "rust_decimal",
  "serde",
  "serde_json",
  "thiserror",

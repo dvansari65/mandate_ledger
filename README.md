@@ -225,7 +225,7 @@ Four traits, each small:
 
 | Trait | Responsibility | Provided |
 |---|---|---|
-| `CartAdapter` | wire format → `Cart { hash, claims, attestation }` | `NativeCartAdapter` — JSON with an optional merchant signature |
+| `CartAdapter` | wire format → `Cart { hash, claims, attestation }` | `NativeCartAdapter` — JSON with an optional merchant signature; `X402CartAdapter` — an x402 v2 resource and its accepted payment requirement |
 | `Rail` | verify a payment proof, report finality | `MockRail`; real rails are next |
 | `Store` | records and hash-chained events, side effects applied atomically; the log and the contexts readable across a restart | `MemoryStore`, `PostgresStore` |
 | `SignerPolicy` | which keys may sign mandates for which principal | `TrustedSigners`; `AcceptAnySigner` is for tests and says so |
@@ -239,7 +239,7 @@ constrains and the cart cannot prove is refused by design.
 ```text
 crates/ml-core             engine: types, mandates and scope, state machine,
                            store trait, ledger, evidence bundles
-crates/ml-adapters         NativeCartAdapter, MockRail
+crates/ml-adapters         NativeCartAdapter, X402CartAdapter, MockRail, SandboxRail
 crates/ml-store-postgres   durable PostgreSQL store
 crates/ml-verify           lifecycle, denial, concurrency, tamper and property tests
 crates/ml-sandbox          the ml command: drive the engine from a terminal
@@ -251,6 +251,7 @@ docs/threat-model.md       what is prevented, bounded, and out of scope
 docs/integration.md        how a merchant, gateway or wallet wires this in
 docs/sandbox.md            the ml command, its files and its exit codes
 docs/service.md            the service: routes, status codes, configuration
+docs/x402.md               the x402 cart, the asset registry, the binding to come
 docs/roadmap.md            what remains, in order, and why
 docs/stability.md          what may change between versions, and what may not
 docs/release.md            how a version is cut, tagged and published
