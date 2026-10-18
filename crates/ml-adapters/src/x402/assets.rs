@@ -5,6 +5,11 @@
 //! symbol; verifying a payment for it, later, takes the EIP-712 domain its
 //! contract signs under. None of that is on the wire, and none of it is
 //! guessed: a token the registry does not know is refused.
+//!
+//! A registry is one deployment's choice of networks. Mainnet and testnet
+//! come separately, and a production registry holds no testnet token: the
+//! money a mandate budgets is the token's symbol, and USDC on a testnet is
+//! not USDC.
 
 use super::types::{Address, ChainId};
 use ml_core::Currency;
@@ -34,6 +39,20 @@ pub struct AssetRegistry {
     assets: HashMap<(ChainId, Address), Asset>,
 }
 
+/// USDC: six decimals, EIP-712 domain `name` version 2.
+fn usdc(domain_name: &str) -> Asset {
+    Asset {
+        symbol: Currency::new("USDC").expect("USDC is a currency code"),
+        decimals: 6,
+        domain_name: domain_name.to_owned(),
+        domain_version: "2".to_owned(),
+    }
+}
+
+fn address(hex: &str) -> Address {
+    Address::parse(hex).expect("a checksummed address")
+}
+
 impl AssetRegistry {
     /// A registry that knows no token.
     #[must_use]
@@ -48,30 +67,29 @@ impl AssetRegistry {
         self
     }
 
-    /// USDC on Base mainnet and on Base Sepolia, with the addresses and
-    /// EIP-712 domains the x402 reference implementation lists.
+    /// USDC on Base mainnet, as the x402 reference implementation lists it
+    /// (`typescript/packages/mechanisms/evm/src/defaultAssets.ts`).
     #[must_use]
-    // The literals below are constants a test checks; `expect` cannot fire.
+    // The literals are constants a test checks; `expect` cannot fire.
     #[allow(clippy::missing_panics_doc)]
     pub fn base() -> Self {
-        let usdc = |name: &str| Asset {
-            symbol: Currency::new("USDC").expect("USDC is a currency code"),
-            decimals: 6,
-            domain_name: name.to_owned(),
-            domain_version: "2".to_owned(),
-        };
-        let address = |s: &str| s.parse().expect("a well-formed address");
-        Self::new()
-            .with_asset(
-                BASE,
-                address("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"),
-                usdc("USD Coin"),
-            )
-            .with_asset(
-                BASE_SEPOLIA,
-                address("0x036CbD53842c5426634e7929541eC2318f3dCF7e"),
-                usdc("USDC"),
-            )
+        Self::new().with_asset(
+            BASE,
+            address("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"),
+            usdc("USD Coin"),
+        )
+    }
+
+    /// USDC on Base Sepolia, the testnet, as the reference implementation
+    /// lists it. For sandboxes and tests; never alongside [`Self::base`].
+    #[must_use]
+    #[allow(clippy::missing_panics_doc)]
+    pub fn base_sepolia() -> Self {
+        Self::new().with_asset(
+            BASE_SEPOLIA,
+            address("0x036CbD53842c5426634e7929541eC2318f3dCF7e"),
+            usdc("USDC"),
+        )
     }
 
     /// The token at `contract` on `chain`, if known.
@@ -86,20 +104,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn base_knows_usdc_on_both_chains_and_nothing_else() {
-        let registry = AssetRegistry::base();
-        let mainnet: Address = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
-            .parse()
-            .unwrap();
-        let sepolia: Address = "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
-            .parse()
-            .unwrap();
-        assert_eq!(registry.get(BASE, mainnet).unwrap().domain_name, "USD Coin");
+    fn mainnet_and_testnet_registries_are_separate() {
+        let mainnet = address("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913");
+        let sepolia = address("0x036CbD53842c5426634e7929541eC2318f3dCF7e");
+        let base = AssetRegistry::base();
+        assert_eq!(base.get(BASE, mainnet).unwrap().domain_name, "USD Coin");
+        assert_eq!(base.get(BASE_SEPOLIA, sepolia), None);
+        let testnet = AssetRegistry::base_sepolia();
         assert_eq!(
-            registry.get(BASE_SEPOLIA, sepolia).unwrap().domain_name,
+            testnet.get(BASE_SEPOLIA, sepolia).unwrap().domain_name,
             "USDC"
         );
-        assert_eq!(registry.get(BASE, sepolia), None);
-        assert_eq!(registry.get(ChainId::new(1), mainnet), None);
+        assert_eq!(testnet.get(BASE, mainnet), None);
+        assert_eq!(base.get(ChainId::new(1), mainnet), None);
     }
 }

@@ -1,20 +1,19 @@
 //! From an x402 cart document to a [`Cart`].
 
 use super::assets::{Asset, AssetRegistry};
-use super::types::{Address, ChainId, PaymentRequirements, ResourceInfo, X402Cart};
+use super::types::{Address, ChainId, PaymentRequirements, ResourceInfo, X402Cart, account_id};
 use ml_core::{
     AdapterError, Attestation, Cart, CartAdapter, MerchantId, Money, ScopeClaims, canonical_json,
 };
 use rust_decimal::Decimal;
+use serde::Deserialize as _;
 
 /// The most digits a `uint256` has.
 const MAX_AMOUNT_DIGITS: usize = 78;
-/// The longest URL accepted, as the reference implementation bounds its own.
-const MAX_URL_LEN: usize = 2048;
-/// The longest free text accepted in a resource description or media type.
-const MAX_TEXT_LEN: usize = 1024;
-/// Service names and tags: printable ASCII, this long at most, as the
-/// specification says.
+/// The longest icon URL, in UTF-16 code units, as the reference schema
+/// bounds it.
+const MAX_ICON_URL_LEN: usize = 2048;
+/// Service names and tags: printable ASCII, this long at most.
 const MAX_LABEL_LEN: usize = 32;
 /// Tags on a resource, at most.
 const MAX_TAGS: usize = 5;
@@ -53,23 +52,10 @@ fn unsupported(what: &str) -> AdapterError {
     AdapterError::Unsupported(what.to_owned())
 }
 
-fn printable_ascii(s: &str) -> bool {
-    s.bytes().all(|b| (0x20..=0x7E).contains(&b))
-}
-
-/// A string field: present, non-empty, bounded, and free of control
-/// characters.
-fn text(field: &str, value: &str, max: usize) -> Result<(), AdapterError> {
-    if value.is_empty() || value.len() > max || value.chars().any(char::is_control) {
-        return Err(malformed(&format!(
-            "{field}: 1 to {max} bytes, no control characters"
-        )));
-    }
-    Ok(())
-}
-
+/// A service name or a tag: 1 to 32 printable ASCII characters.
 fn label(field: &str, value: &str) -> Result<(), AdapterError> {
-    if value.is_empty() || value.len() > MAX_LABEL_LEN || !printable_ascii(value) {
+    let printable = value.bytes().all(|b| (0x20..=0x7E).contains(&b));
+    if value.is_empty() || value.len() > MAX_LABEL_LEN || !printable {
         return Err(malformed(&format!(
             "{field}: 1 to {MAX_LABEL_LEN} printable ASCII characters"
         )));
@@ -77,16 +63,12 @@ fn label(field: &str, value: &str) -> Result<(), AdapterError> {
     Ok(())
 }
 
+/// The resource, bounded exactly as the reference schema bounds it and no
+/// further: none of it is a claim, so refusing what the reference accepts
+/// would only refuse honest merchants.
 fn resource(info: &ResourceInfo) -> Result<(), AdapterError> {
-    text("resource.url", &info.url, MAX_URL_LEN)?;
-    if info.url.contains(char::is_whitespace) {
-        return Err(malformed("resource.url: not a URL"));
-    }
-    if let Some(description) = &info.description {
-        text("resource.description", description, MAX_TEXT_LEN)?;
-    }
-    if let Some(mime_type) = &info.mime_type {
-        text("resource.mimeType", mime_type, MAX_TEXT_LEN)?;
+    if info.url.is_empty() {
+        return Err(malformed("resource.url: required"));
     }
     if let Some(name) = &info.service_name {
         label("resource.serviceName", name)?;
@@ -100,22 +82,36 @@ fn resource(info: &ResourceInfo) -> Result<(), AdapterError> {
         }
     }
     if let Some(icon) = &info.icon_url {
-        text("resource.iconUrl", icon, MAX_URL_LEN)?;
-        if !(icon.starts_with("https://") || icon.starts_with("http://")) {
-            return Err(malformed("resource.iconUrl: not an http or https URL"));
+        if icon.encode_utf16().count() > MAX_ICON_URL_LEN {
+            return Err(malformed("resource.iconUrl: at most 2048 characters"));
         }
     }
     Ok(())
 }
 
-/// The amount in atomic units: a whole decimal number of at most 78
-/// digits, the range of a `uint256`, within what this adapter prices.
+/// An address field. Something that is not even trying to be an EVM
+/// address — a role constant such as `merchant`, a fiat code — is valid
+/// x402 this adapter does not support; a broken one is malformed.
+fn address(field: &str, value: &str) -> Result<Address, AdapterError> {
+    if !value.starts_with("0x") {
+        return Err(unsupported(&format!("{field}: only an EVM address")));
+    }
+    Address::parse(value).map_err(|why| malformed(&format!("{field}: {why}")))
+}
+
+/// The amount in atomic units: a whole decimal number written canonically
+/// — `0`, or no leading zero, so one amount has one spelling and one hash —
+/// of at most 78 digits, the range of a `uint256`, within what this
+/// adapter prices.
 fn atomic_amount(amount: &str) -> Result<u128, AdapterError> {
-    let digits = !amount.is_empty()
+    let canonical = !amount.is_empty()
         && amount.len() <= MAX_AMOUNT_DIGITS
-        && amount.bytes().all(|b| b.is_ascii_digit());
-    if !digits {
-        return Err(malformed("amount: a whole number of atomic units"));
+        && amount.bytes().all(|b| b.is_ascii_digit())
+        && (amount == "0" || !amount.starts_with('0'));
+    if !canonical {
+        return Err(malformed(
+            "amount: a whole number of atomic units, without leading zeros",
+        ));
     }
     amount
         .parse()
@@ -132,27 +128,24 @@ fn money(atomic: u128, token: &Asset) -> Result<Money, AdapterError> {
 }
 
 /// The `extra` object of an `exact` EVM requirement: the default transfer
-/// method and payment flow, and the asset's own EIP-712 domain.
+/// method and payment flow — absent or `null` meaning the default, as the
+/// reference resolves them — and the asset's own EIP-712 domain.
 fn extra(extra: Option<&serde_json::Value>, token: &Asset) -> Result<(), AdapterError> {
-    let Some(extra) = extra else {
-        return Err(malformed(
-            "extra: name and version are required for eip3009",
-        ));
+    let required = || malformed("extra: name and version are required for eip3009");
+    let fields = match extra {
+        None => return Err(required()),
+        Some(extra) => extra
+            .as_object()
+            .ok_or_else(|| malformed("extra: not an object"))?,
     };
-    let Some(fields) = extra.as_object() else {
-        return Err(malformed("extra: not an object"));
-    };
+    let reserved = |key: &str| fields.get(key).filter(|v| !v.is_null());
+    if reserved("assetTransferMethod").is_some_and(|m| m.as_str() != Some("eip3009")) {
+        return Err(unsupported("extra.assetTransferMethod: only eip3009"));
+    }
+    if reserved("paymentFlow").is_some_and(|f| f.as_str() != Some("authorization")) {
+        return Err(unsupported("extra.paymentFlow: only authorization"));
+    }
     let string = |key: &str| fields.get(key).and_then(serde_json::Value::as_str);
-    match fields.get("assetTransferMethod") {
-        None => {}
-        Some(method) if method.as_str() == Some("eip3009") => {}
-        Some(_) => return Err(unsupported("extra.assetTransferMethod: only eip3009")),
-    }
-    match fields.get("paymentFlow") {
-        None => {}
-        Some(flow) if flow.as_str() == Some("authorization") => {}
-        Some(_) => return Err(unsupported("extra.paymentFlow: only authorization")),
-    }
     match (string("name"), string("version")) {
         (Some(name), Some(version))
             if name == token.domain_name && version == token.domain_version =>
@@ -162,9 +155,7 @@ fn extra(extra: Option<&serde_json::Value>, token: &Asset) -> Result<(), Adapter
         (Some(_), Some(_)) => Err(unsupported(
             "extra.name and extra.version: not the asset's EIP-712 domain",
         )),
-        _ => Err(malformed(
-            "extra: name and version are required for eip3009",
-        )),
+        _ => Err(required()),
     }
 }
 
@@ -175,12 +166,6 @@ impl X402CartAdapter {
         Self { registry }
     }
 
-    /// The registry.
-    #[must_use]
-    pub fn registry(&self) -> &AssetRegistry {
-        &self.registry
-    }
-
     /// Check a requirement and read it as [`ExactTerms`], refusing anything
     /// this adapter does not price exactly as the merchant meant it.
     pub fn terms(&self, accepted: &PaymentRequirements) -> Result<ExactTerms, AdapterError> {
@@ -188,19 +173,20 @@ impl X402CartAdapter {
             return Err(unsupported("scheme: only exact"));
         }
         let chain: ChainId = accepted.network.parse()?;
-        let asset: Address = accepted
-            .asset
-            .parse()
-            .map_err(|_| malformed("asset: not an EVM address"))?;
+        let asset = address("asset", &accepted.asset)?;
         let token = self
             .registry
             .get(chain, asset)
             .ok_or_else(|| unsupported("asset: not a token this adapter knows on this chain"))?
             .clone();
-        let pay_to: Address = accepted
-            .pay_to
-            .parse()
-            .map_err(|_| malformed("payTo: not an EVM address"))?;
+        let pay_to = address("payTo", &accepted.pay_to)?;
+        // Tokens sent to either are gone.
+        if pay_to == Address::ZERO {
+            return Err(malformed("payTo: the zero address"));
+        }
+        if pay_to == asset {
+            return Err(malformed("payTo: the token contract itself"));
+        }
         let atomic = atomic_amount(&accepted.amount)?;
         let total = money(atomic, &token)?;
         if accepted.max_timeout_seconds == 0 {
@@ -217,40 +203,44 @@ impl X402CartAdapter {
             max_timeout_seconds: accepted.max_timeout_seconds,
         })
     }
+}
 
-    /// Normalize an already-parsed document whose canonical bytes are `raw`.
-    fn normalize_document(&self, document: &X402Cart, raw: Vec<u8>) -> Result<Cart, AdapterError> {
+impl CartAdapter for X402CartAdapter {
+    /// `raw` is the JSON of an [`X402Cart`]. The cart's bytes are its RFC
+    /// 8785 canonical form, unknown fields inside `resource` and `accepted`
+    /// included, so the hash binds what was presented, not only what was
+    /// understood. RFC 8785 writes numbers through IEEE-754 doubles: every
+    /// field the ledger reads is a string or a small integer, so no claim
+    /// is touched, but two documents that differ only in the far digits of
+    /// some other number are the same cart.
+    fn normalize(&self, raw: &[u8]) -> Result<Cart, AdapterError> {
+        let value: serde_json::Value =
+            serde_json::from_slice(raw).map_err(|e| malformed(&format!("not JSON: {e}")))?;
+        let document = X402Cart::deserialize(&value)
+            .map_err(|e| malformed(&format!("not an x402 cart: {e}")))?;
         if document.x402_version != 2 {
             return Err(unsupported("x402Version: only 2"));
         }
         resource(&document.resource)?;
         let terms = self.terms(&document.accepted)?;
         let claims = ScopeClaims {
-            merchant: MerchantId::new(terms.pay_to.to_string())?,
+            merchant: MerchantId::new(account_id(terms.chain, terms.pay_to))?,
             total: terms.total,
             category: None,
             line_count: None,
         };
-        Ok(Cart::new(raw, claims, Attestation::AgentReported))
-    }
-}
-
-impl CartAdapter for X402CartAdapter {
-    /// `raw` is the JSON of an [`X402Cart`]. The cart's bytes are its
-    /// canonical form, unknown fields and all, so the hash binds what was
-    /// presented, not only what was understood.
-    fn normalize(&self, raw: &[u8]) -> Result<Cart, AdapterError> {
-        let value: serde_json::Value =
-            serde_json::from_slice(raw).map_err(|e| malformed(&format!("not JSON: {e}")))?;
-        let document: X402Cart = serde_json::from_value(value.clone())
-            .map_err(|e| malformed(&format!("not an x402 cart: {e}")))?;
-        self.normalize_document(&document, canonical_json(&value)?)
+        Ok(Cart::new(
+            canonical_json(&value)?,
+            claims,
+            Attestation::AgentReported,
+        ))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::x402::{BASE_SEPOLIA, ChainId};
     use ml_core::AttestationLevel;
     use serde_json::{Value, json};
 
@@ -275,12 +265,27 @@ mod tests {
         })
     }
 
-    fn adapter() -> X402CartAdapter {
-        X402CartAdapter::new(AssetRegistry::base())
+    /// The same purchase on Base mainnet.
+    fn mainnet() -> Value {
+        let value = with(example(), &["accepted", "network"], json!("eip155:8453"));
+        let value = with(
+            value,
+            &["accepted", "asset"],
+            json!("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"),
+        );
+        with(
+            value,
+            &["accepted", "extra"],
+            json!({"name": "USD Coin", "version": "2"}),
+        )
+    }
+
+    fn testnet() -> X402CartAdapter {
+        X402CartAdapter::new(AssetRegistry::base_sepolia())
     }
 
     fn normalize(value: &Value) -> Result<Cart, AdapterError> {
-        adapter().normalize(&serde_json::to_vec(value).unwrap())
+        testnet().normalize(&serde_json::to_vec(value).unwrap())
     }
 
     fn with(mut value: Value, path: &[&str], field: Value) -> Value {
@@ -292,16 +297,20 @@ mod tests {
         value
     }
 
+    fn kind(err: &AdapterError) -> &'static str {
+        match err {
+            AdapterError::Malformed(_) => "Malformed",
+            AdapterError::Unsupported(_) => "Unsupported",
+            _ => "other",
+        }
+    }
+
     #[test]
     fn the_specification_example_is_a_cart() {
         let cart = normalize(&example()).unwrap();
         assert_eq!(
             cart.claims().merchant.as_str(),
-            "0x209693bc6afc0c5328ba36faf03c514ef312287c"
-        );
-        assert_eq!(
-            cart.claims().total,
-            Money::parse("0.010000", "USDC").unwrap()
+            "eip155:84532:0x209693bc6afc0c5328ba36faf03c514ef312287c"
         );
         assert_eq!(cart.claims().total.to_string(), "0.010000 USDC");
         assert_eq!(cart.claims().category, None);
@@ -310,9 +319,43 @@ mod tests {
     }
 
     #[test]
+    fn the_same_payee_on_another_chain_is_another_merchant() {
+        let base = X402CartAdapter::new(AssetRegistry::base());
+        let on_mainnet = base
+            .normalize(&serde_json::to_vec(&mainnet()).unwrap())
+            .unwrap();
+        let on_testnet = normalize(&example()).unwrap();
+        assert_eq!(
+            on_mainnet.claims().merchant.as_str(),
+            "eip155:8453:0x209693bc6afc0c5328ba36faf03c514ef312287c"
+        );
+        assert_ne!(on_mainnet.claims().merchant, on_testnet.claims().merchant);
+        // A mainnet registry does not price the testnet token, and the
+        // other way round.
+        let err = base
+            .normalize(&serde_json::to_vec(&example()).unwrap())
+            .unwrap_err();
+        assert_eq!(kind(&err), "Unsupported", "{err}");
+        assert_eq!(kind(&normalize(&mainnet()).unwrap_err()), "Unsupported");
+        // The testnet domain name on the mainnet token is refused.
+        let wrong = with(
+            mainnet(),
+            &["accepted", "extra"],
+            json!({"name": "USDC", "version": "2"}),
+        );
+        let err = base
+            .normalize(&serde_json::to_vec(&wrong).unwrap())
+            .unwrap_err();
+        assert!(
+            matches!(&err, AdapterError::Unsupported(e) if e.contains("EIP-712")),
+            "{err}"
+        );
+    }
+
+    #[test]
     fn the_hash_is_over_the_document_as_presented() {
         let cart = normalize(&example()).unwrap();
-        // Key order does not matter; an unknown field does.
+        // Key order does not matter; an unknown field inside does.
         let reordered: Value = serde_json::from_str(
             r#"{"accepted":{"extra":{"version":"2","name":"USDC"},"maxTimeoutSeconds":60,"payTo":"0x209693Bc6afc0C5328bA36FaF03C514EF312287C","asset":"0x036CbD53842c5426634e7929541eC2318f3dCF7e","amount":"10000","network":"eip155:84532","scheme":"exact"},"resource":{"mimeType":"application/json","description":"Access to premium market data","url":"https://api.example.com/premium-data"},"x402Version":2}"#,
         )
@@ -322,70 +365,56 @@ mod tests {
         let other = normalize(&extended).unwrap();
         assert_ne!(other.hash(), cart.hash());
         assert_eq!(other.claims(), cart.claims());
+        // Echoed extensions are part of the purchase.
+        let with_extensions = with(example(), &["extensions"], json!({"bazaar": {}}));
+        assert_ne!(normalize(&with_extensions).unwrap().hash(), cart.hash());
     }
 
     #[test]
-    fn base_mainnet_usdc_has_its_own_domain() {
-        let mainnet = with(
-            with(
-                with(example(), &["accepted", "network"], json!("eip155:8453")),
-                &["accepted", "asset"],
-                json!("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"),
-            ),
-            &["accepted", "extra"],
-            json!({"name": "USD Coin", "version": "2"}),
+    fn a_cart_never_carries_the_signed_payment() {
+        let signed = with(
+            example(),
+            &["payload"],
+            json!({"signature": "0x00", "authorization": {}}),
         );
-        assert!(normalize(&mainnet).is_ok());
-        // The Sepolia domain name on the mainnet token is refused.
-        let wrong = with(
-            mainnet,
-            &["accepted", "extra"],
-            json!({"name": "USDC", "version": "2"}),
-        );
+        let err = normalize(&signed).unwrap_err();
         assert!(
-            matches!(normalize(&wrong), Err(AdapterError::Unsupported(e)) if e.contains("EIP-712"))
+            matches!(&err, AdapterError::Malformed(e) if e.contains("payload")),
+            "{err}"
         );
+        let stray = with(example(), &["note"], json!("x"));
+        assert_eq!(kind(&normalize(&stray).unwrap_err()), "Malformed");
     }
 
     #[test]
-    fn amounts_are_exact_in_the_tokens_decimals() {
-        let one = with(example(), &["accepted", "amount"], json!("1"));
-        assert_eq!(
-            normalize(&one).unwrap().claims().total.to_string(),
-            "0.000001 USDC"
-        );
-        let big = with(example(), &["accepted", "amount"], json!("1500000"));
-        assert_eq!(
-            normalize(&big).unwrap().claims().total.to_string(),
-            "1.500000 USDC"
-        );
-        let zero = with(example(), &["accepted", "amount"], json!("0"));
-        assert_eq!(
-            normalize(&zero).unwrap().claims().total.to_string(),
-            "0.000000 USDC"
-        );
-        for bad in ["", "-1", "1.5", "1e6", "10,000", " 1", "0x10"] {
+    fn amounts_are_exact_canonical_and_in_the_tokens_decimals() {
+        for (atomic, money) in [
+            ("1", "0.000001 USDC"),
+            ("1500000", "1.500000 USDC"),
+            ("0", "0.000000 USDC"),
+        ] {
+            let value = with(example(), &["accepted", "amount"], json!(atomic));
+            assert_eq!(normalize(&value).unwrap().claims().total.to_string(), money);
+        }
+        for bad in [
+            "", "-1", "1.5", "1e6", "10,000", " 1", "0x10", "010000", "00",
+        ] {
             let value = with(example(), &["accepted", "amount"], json!(bad));
-            assert!(
-                matches!(normalize(&value), Err(AdapterError::Malformed(_))),
+            assert_eq!(
+                kind(&normalize(&value).unwrap_err()),
+                "Malformed",
                 "{bad:?}"
             );
         }
         let huge = with(example(), &["accepted", "amount"], json!("9".repeat(39)));
-        assert!(matches!(
-            normalize(&huge),
-            Err(AdapterError::Unsupported(_))
-        ));
+        assert_eq!(kind(&normalize(&huge).unwrap_err()), "Unsupported");
         let too_long = with(example(), &["accepted", "amount"], json!("1".repeat(79)));
-        assert!(matches!(
-            normalize(&too_long),
-            Err(AdapterError::Malformed(_))
-        ));
+        assert_eq!(kind(&normalize(&too_long).unwrap_err()), "Malformed");
     }
 
     #[test]
     fn only_what_the_adapter_prices_gets_through() {
-        let cases: [(&[&str], Value, &str); 12] = [
+        let cases: [(&[&str], Value, &str); 17] = [
             (&["x402Version"], json!(1), "Unsupported"),
             (&["accepted", "scheme"], json!("upto"), "Unsupported"),
             (
@@ -399,8 +428,28 @@ mod tests {
                 json!("0x0000000000000000000000000000000000000001"),
                 "Unsupported",
             ),
-            (&["accepted", "asset"], json!("usdc"), "Malformed"),
-            (&["accepted", "payTo"], json!("merchant"), "Malformed"),
+            // Valid x402 this adapter does not support: a fiat asset, a
+            // role constant as the payee.
+            (&["accepted", "asset"], json!("USD"), "Unsupported"),
+            (&["accepted", "payTo"], json!("merchant"), "Unsupported"),
+            // Broken: not an address, or a typo in a checksummed one.
+            (&["accepted", "payTo"], json!("0x1234"), "Malformed"),
+            (
+                &["accepted", "payTo"],
+                json!("0x209693bC6afc0C5328bA36FaF03C514EF312287C"),
+                "Malformed",
+            ),
+            // Lost funds.
+            (
+                &["accepted", "payTo"],
+                json!("0x0000000000000000000000000000000000000000"),
+                "Malformed",
+            ),
+            (
+                &["accepted", "payTo"],
+                json!("0x036CbD53842c5426634e7929541eC2318f3dCF7e"),
+                "Malformed",
+            ),
             (&["accepted", "maxTimeoutSeconds"], json!(0), "Malformed"),
             (&["accepted", "maxTimeoutSeconds"], json!(60.5), "Malformed"),
             (
@@ -414,80 +463,92 @@ mod tests {
                 "Unsupported",
             ),
             (&["accepted", "extra"], json!({"name": "USDC"}), "Malformed"),
+            (&["accepted", "extra"], json!(["USDC", "2"]), "Malformed"),
         ];
         for (path, field, expected) in cases {
             let err = normalize(&with(example(), path, field.clone())).unwrap_err();
-            let kind = match err {
-                AdapterError::Malformed(_) => "Malformed",
-                AdapterError::Unsupported(_) => "Unsupported",
-                other => panic!("{path:?}: {other}"),
-            };
-            assert_eq!(kind, expected, "{path:?} = {field}: {err}");
+            assert_eq!(kind(&err), expected, "{path:?} = {field}: {err}");
         }
         let mut no_extra = example();
         no_extra["accepted"]
             .as_object_mut()
             .unwrap()
             .remove("extra");
-        assert!(matches!(
-            normalize(&no_extra),
-            Err(AdapterError::Malformed(_))
-        ));
+        assert_eq!(kind(&normalize(&no_extra).unwrap_err()), "Malformed");
         let mut no_resource = example();
         no_resource.as_object_mut().unwrap().remove("resource");
-        assert!(matches!(
-            normalize(&no_resource),
-            Err(AdapterError::Malformed(_))
-        ));
-        assert!(matches!(
-            adapter().normalize(b"[]"),
-            Err(AdapterError::Malformed(_))
-        ));
-        assert!(matches!(
-            adapter().normalize(b"{not json"),
-            Err(AdapterError::Malformed(_))
-        ));
+        assert_eq!(kind(&normalize(&no_resource).unwrap_err()), "Malformed");
+        assert_eq!(kind(&testnet().normalize(b"[]").unwrap_err()), "Malformed");
+        assert_eq!(
+            kind(&testnet().normalize(b"{not json").unwrap_err()),
+            "Malformed"
+        );
     }
 
     #[test]
-    fn the_resource_is_checked_as_the_specification_bounds_it() {
-        let ok = with(
-            example(),
-            &["resource"],
-            json!({
-                "url": "https://api.example.com/premium-data",
-                "serviceName": "Example Market Data",
-                "tags": ["market-data", "finance"],
-                "iconUrl": "https://api.example.com/icon.png"
-            }),
-        );
-        assert!(normalize(&ok).is_ok());
+    fn the_defaults_may_be_spelt_out_or_null() {
+        for extra in [
+            json!({"name": "USDC", "version": "2", "assetTransferMethod": "eip3009", "paymentFlow": "authorization"}),
+            json!({"name": "USDC", "version": "2", "assetTransferMethod": null, "paymentFlow": null}),
+        ] {
+            let value = with(example(), &["accepted", "extra"], extra.clone());
+            assert!(normalize(&value).is_ok(), "{extra}");
+        }
+    }
+
+    #[test]
+    fn the_resource_is_bounded_as_the_reference_bounds_it() {
+        // What the reference schema accepts is accepted: empty and
+        // multi-line text, long URLs, explicit nulls, any icon scheme.
+        for (path, field) in [
+            (&["resource", "description"][..], json!("")),
+            (&["resource", "description"][..], json!("two\nlines")),
+            (&["resource", "description"][..], Value::Null),
+            (&["resource", "mimeType"][..], json!("")),
+            (&["resource", "mimeType"][..], Value::Null),
+            (
+                &["resource", "url"][..],
+                json!(format!("https://a.example/?q={}", "x".repeat(4000))),
+            ),
+            (
+                &["resource", "serviceName"][..],
+                json!("Example Market Data"),
+            ),
+            (&["resource", "serviceName"][..], Value::Null),
+            (&["resource", "tags"][..], json!(["market-data", "finance"])),
+            (&["resource", "tags"][..], Value::Null),
+            (&["resource", "iconUrl"][..], json!("")),
+            (&["resource", "iconUrl"][..], json!("ipfs://icon")),
+            (&["resource", "iconUrl"][..], Value::Null),
+            (&["extensions"][..], Value::Null),
+        ] {
+            let value = with(example(), path, field.clone());
+            assert!(normalize(&value).is_ok(), "{path:?} = {field}");
+        }
+        // What it refuses is refused.
         for (path, field) in [
             (&["resource", "url"][..], json!("")),
-            (&["resource", "url"][..], json!("https://a b")),
             (&["resource", "serviceName"][..], json!("x".repeat(33))),
             (&["resource", "serviceName"][..], json!("caf\u{e9}")),
+            (&["resource", "serviceName"][..], json!("")),
             (
                 &["resource", "tags"][..],
                 json!(["a", "b", "c", "d", "e", "f"]),
             ),
             (&["resource", "tags"][..], json!([""])),
-            (&["resource", "iconUrl"][..], json!("ftp://icons/x.png")),
-            (&["resource", "description"][..], json!("line\nbreak")),
+            (&["resource", "iconUrl"][..], json!("x".repeat(2049))),
         ] {
             let err = normalize(&with(example(), path, field.clone())).unwrap_err();
-            assert!(
-                matches!(err, AdapterError::Malformed(_)),
-                "{path:?} = {field}: {err}"
-            );
+            assert_eq!(kind(&err), "Malformed", "{path:?} = {field}: {err}");
         }
     }
 
     #[test]
     fn terms_carry_what_the_rail_will_need() {
         let document: X402Cart = serde_json::from_value(example()).unwrap();
-        let terms = adapter().terms(&document.accepted).unwrap();
-        assert_eq!(terms.chain, super::super::BASE_SEPOLIA);
+        let terms = testnet().terms(&document.accepted).unwrap();
+        assert_eq!(terms.chain, BASE_SEPOLIA);
+        assert_ne!(terms.chain, ChainId::new(8453));
         assert_eq!(terms.atomic_amount, 10_000);
         assert_eq!(terms.token.decimals, 6);
         assert_eq!(terms.token.domain_name, "USDC");

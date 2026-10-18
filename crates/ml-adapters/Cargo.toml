@@ -17,6 +17,7 @@ serde.workspace = true
 serde_json.workspace = true
 hex.workspace = true
 rust_decimal.workspace = true
+sha3.workspace = true
 ed25519-dalek.workspace = true
 thiserror.workspace = true
 

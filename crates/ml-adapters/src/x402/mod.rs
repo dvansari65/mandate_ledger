@@ -6,7 +6,8 @@
 //! `PaymentPayload`, echoes it as `accepted`. The two together are the cart:
 //! what the agent is buying, from whom, for how much, in which token on
 //! which chain. This module reads exactly that — the [`X402Cart`] document,
-//! `{ x402Version, resource, accepted }` — and turns it into a
+//! `{ x402Version, resource, accepted, extensions? }`, which is the payment
+//! payload without its signed `payload` — and turns it into a
 //! [`Cart`](ml_core::Cart) the engine can hold a mandate against.
 //!
 //! What the adapter checks, and refuses otherwise:
@@ -15,19 +16,24 @@
 //! - the network is an `eip155` chain and the asset is one the
 //!   [`AssetRegistry`] knows on that chain — an unknown token is never
 //!   priced by guesswork;
-//! - `payTo` and `asset` are EVM addresses, `amount` is a whole number of
-//!   atomic units, `maxTimeoutSeconds` is a positive integer;
+//! - `payTo` and `asset` are EVM addresses — checksummed when written in
+//!   mixed case — and `payTo` is neither the zero address nor the token
+//!   contract; `amount` is a whole number of atomic units written without
+//!   leading zeros; `maxTimeoutSeconds` is a positive integer;
 //! - the transfer method is the default, `eip3009`, and the payment flow
 //!   the default, `authorization`; the EIP-712 domain in `extra` is the
 //!   asset's own.
 //!
 //! The cart hash is over the canonical form of the whole document as
-//! presented, unknown fields included, so the engine binds exactly what the
-//! merchant offered and the client accepted. The claims are the payee as
-//! the merchant, the amount as money in the asset's symbol, and nothing
-//! else: x402 carries no category and no line items, and a claim the
-//! protocol does not carry is not invented. The attestation is
-//! agent-reported, because x402 does not sign its requirements.
+//! presented, unknown fields inside it included, so the engine binds
+//! exactly what the merchant offered and the client accepted. The claims
+//! are the payee as the merchant — a CAIP-10 account id, `eip155:8453:0x…`,
+//! so the same address on another chain is another merchant and a mandate
+//! names the chain it pays on — the amount as money in the asset's symbol,
+//! and nothing else: x402 carries no category and no line items, and a
+//! claim the protocol does not carry is not invented. The attestation is
+//! agent-reported, because x402 does not sign its requirements; a mandate
+//! that requires `merchant_signed` refuses every x402 cart.
 //!
 //! The reference for every field is the specification and the reference
 //! implementation at <https://github.com/coinbase/x402> — `specs/x402-specification-v2.md`,
@@ -40,4 +46,4 @@ mod types;
 
 pub use assets::{Asset, AssetRegistry, BASE, BASE_SEPOLIA};
 pub use cart::{ExactTerms, X402CartAdapter};
-pub use types::{Address, ChainId, PaymentRequirements, ResourceInfo, X402Cart};
+pub use types::{Address, ChainId, PaymentRequirements, ResourceInfo, X402Cart, account_id};

@@ -1,6 +1,7 @@
-//! An x402 cart through the engine: a mandate scoped to the payee, in the
-//! token's currency, authorizes it; the wrong merchant or the wrong
-//! currency is refused by the engine, with the usual codes.
+//! An x402 cart through the engine: a mandate scoped to the payee on its
+//! chain, in the token's currency, authorizes it; the wrong merchant, the
+//! same merchant on another chain, or the wrong currency is refused by the
+//! engine, with the usual codes.
 
 use ml_adapters::MockRail;
 use ml_adapters::x402::{AssetRegistry, X402CartAdapter};
@@ -12,7 +13,7 @@ use ml_core::{
 use serde_json::json;
 
 const T0: i64 = 1_800_000_000;
-const PAYEE: &str = "0x209693bc6afc0c5328ba36faf03c514ef312287c";
+const PAYEE: &str = "eip155:84532:0x209693bc6afc0c5328ba36faf03c514ef312287c";
 
 fn key() -> SigningKey {
     SigningKey::from_bytes(&[7u8; 32])
@@ -67,7 +68,7 @@ fn cart() -> ml_core::Cart {
             "extra": {"name": "USDC", "version": "2"}
         }
     });
-    X402CartAdapter::new(AssetRegistry::base())
+    X402CartAdapter::new(AssetRegistry::base_sepolia())
         .normalize(&serde_json::to_vec(&document).unwrap())
         .unwrap()
 }
@@ -87,11 +88,16 @@ fn a_mandate_for_the_payee_in_usdc_authorizes_the_cart() {
 
 #[test]
 fn the_wrong_payee_or_currency_is_refused_by_the_engine() {
-    let other = "0x857b06519e91e3a54538791bdbb0e22373e36b66";
-    let err = ledger()
-        .authorize(&mandate(other, "USDC"), &cart(), "order-2")
-        .unwrap_err();
-    assert_eq!(reason(&err), DenyReason::ScopeMerchantMismatch);
+    for other in [
+        "eip155:84532:0x857b06519e91e3a54538791bdbb0e22373e36b66",
+        // The same address on Base mainnet is another merchant.
+        "eip155:8453:0x209693bc6afc0c5328ba36faf03c514ef312287c",
+    ] {
+        let err = ledger()
+            .authorize(&mandate(other, "USDC"), &cart(), "order-2")
+            .unwrap_err();
+        assert_eq!(reason(&err), DenyReason::ScopeMerchantMismatch, "{other}");
+    }
     let err = ledger()
         .authorize(&mandate(PAYEE, "INR"), &cart(), "order-3")
         .unwrap_err();
