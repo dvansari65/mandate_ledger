@@ -53,12 +53,19 @@ pub struct VerifiedProof {
 }
 
 /// What the engine recorded at payment, handed to the rail for finality.
+/// A rail whose evidence shows what moved — a receipt's transfer events —
+/// checks it against `amount` and `merchant`, so evidence of some other
+/// payment from the same payer is not taken for this one.
 #[derive(Clone, Copy, Debug)]
 pub struct SettlementExpectation<'a> {
     /// The context awaiting settlement.
     pub ctx: &'a ContextId,
     /// The payment reference recorded at `record_payment`.
     pub payment_reference: &'a str,
+    /// The authorized amount.
+    pub amount: &'a Money,
+    /// The authorized merchant.
+    pub merchant: &'a MerchantId,
 }
 
 /// Whether a payment has reached finality.

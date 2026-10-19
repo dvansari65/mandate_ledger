@@ -241,9 +241,13 @@ mod tests {
 
     fn check(rail: &SandboxRail, reference: &str) -> Result<FinalityStatus, RailError> {
         let ctx = ContextId::new("ctx").unwrap();
+        let amount = ml_core::Money::parse("1", "INR").unwrap();
+        let merchant = ml_core::MerchantId::new("m.example").unwrap();
         let expected = SettlementExpectation {
             ctx: &ctx,
             payment_reference: reference,
+            amount: &amount,
+            merchant: &merchant,
         };
         rail.check_finality(
             &Finality {

@@ -473,6 +473,8 @@ where
             &SettlementExpectation {
                 ctx,
                 payment_reference,
+                amount: &rec.amount,
+                merchant: &rec.merchant,
             },
         ) {
             Ok(s) => s,
