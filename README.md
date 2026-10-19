@@ -90,6 +90,10 @@ anything before `settled`. A refusal is not an error path bolted on the
 side — it lands in the same chain as a success, with a machine-readable
 reason. And nothing in the diagram moves money except the rail.
 
+For a real protocol end to end — an AI agent paying with x402, and where
+each of the ledger's calls sits in that exchange — see the sequence
+diagram in [`docs/x402.md`](docs/x402.md).
+
 ## Getting started
 
 ### Requirements

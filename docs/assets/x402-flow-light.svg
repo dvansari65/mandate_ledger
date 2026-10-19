@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 970" width="1200" height="970" role="img" aria-labelledby="t d">
+<title id="t">How an AI agent pays with x402 through mandate-ledger</title>
+<desc id="d">A sequence diagram. The agent requests a resource and gets a 402 with the price. It asks mandate-ledger to authorize the cart under its mandate, gets a context id, signs an EIP-3009 authorization whose nonce is bound to that context, and records the payment, which the ledger verifies. It retries with the payment; the merchant has the facilitator settle it on Base. The merchant records the settlement, which the ledger calls final after enough confirmations, records delivery, and returns the resource.</desc>
+<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 1L9 5L0 9z" fill="#475569"/></marker><marker id="acc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 1L9 5L0 9z" fill="#4f46e5"/></marker><marker id="ret" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1L9 5L1 9" fill="none" stroke="#94a3b8" stroke-width="1.5"/></marker></defs>
+<rect width="1200" height="970" fill="#ffffff"/>
+<line x1="140" y1="112" x2="140" y2="874" stroke="#cbd5e1" stroke-width="1.25" stroke-dasharray="4 5"/>
+<line x1="390" y1="112" x2="390" y2="874" stroke="#cbd5e1" stroke-width="1.25" stroke-dasharray="4 5"/>
+<line x1="650" y1="112" x2="650" y2="874" stroke="#cbd5e1" stroke-width="1.25" stroke-dasharray="4 5"/>
+<line x1="870" y1="112" x2="870" y2="874" stroke="#cbd5e1" stroke-width="1.25" stroke-dasharray="4 5"/>
+<line x1="1070" y1="112" x2="1070" y2="874" stroke="#cbd5e1" stroke-width="1.25" stroke-dasharray="4 5"/>
+<rect x="383" y="228" width="14" height="74" rx="3" fill="#eef2ff" stroke="#4f46e5" stroke-width="1.25"/>
+<rect x="383" y="366" width="14" height="74" rx="3" fill="#eef2ff" stroke="#4f46e5" stroke-width="1.25"/>
+<rect x="383" y="688" width="14" height="74" rx="3" fill="#eef2ff" stroke="#4f46e5" stroke-width="1.25"/>
+<rect x="383" y="780" width="14" height="28" rx="3" fill="#eef2ff" stroke="#4f46e5" stroke-width="1.25"/>
+<rect x="45" y="40" width="190" height="72" rx="12" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.25"/>
+<text x="140" y="70" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" font-weight="600" fill="#0f172a">AI agent</text>
+<text x="140" y="92" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#64748b">x402 client, wallet</text>
+<rect x="295" y="40" width="190" height="72" rx="12" fill="#eef2ff" stroke="#4f46e5" stroke-width="1.5"/>
+<text x="390" y="70" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" font-weight="600" fill="#3730a3">mandate-ledger</text>
+<text x="390" y="92" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#64748b">the four checks</text>
+<rect x="555" y="40" width="190" height="72" rx="12" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.25"/>
+<text x="650" y="70" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" font-weight="600" fill="#0f172a">Merchant API</text>
+<text x="650" y="92" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#64748b">x402 resource server</text>
+<rect x="775" y="40" width="190" height="72" rx="12" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.25"/>
+<text x="870" y="70" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" font-weight="600" fill="#0f172a">Facilitator</text>
+<text x="870" y="92" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#64748b">settles on chain</text>
+<rect x="975" y="40" width="190" height="72" rx="12" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.25"/>
+<text x="1070" y="70" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" font-weight="600" fill="#0f172a">Base · USDC</text>
+<text x="1070" y="92" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#64748b">EIP-3009 token</text>
+<line x1="140" y1="150" x2="648" y2="150" stroke="#475569" stroke-width="1.75" marker-end="url(#arr)"/>
+<circle cx="162" cy="138" r="10" fill="#0f172a"/>
+<text x="162" y="142" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="700" fill="#ffffff">1</text>
+<rect x="173" y="129" width="127" height="18" rx="4" fill="#ffffff"/>
+<text x="178" y="142" text-anchor="start" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12.5" fill="#0f172a">GET /premium-data</text>
+<line x1="650" y1="196" x2="142" y2="196" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6 5" marker-end="url(#ret)"/>
+<rect x="410" y="175" width="231" height="18" rx="4" fill="#ffffff"/>
+<text x="636" y="188" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12.5" fill="#64748b">402 · price, payTo, token, chain</text>
+<line x1="140" y1="242" x2="381" y2="242" stroke="#4f46e5" stroke-width="1.75" marker-end="url(#acc)"/>
+<circle cx="162" cy="230" r="10" fill="#4f46e5"/>
+<text x="162" y="234" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="700" fill="#ffffff">2</text>
+<rect x="173" y="221" width="176" height="18" rx="4" fill="#ffffff"/>
+<text x="178" y="234" text-anchor="start" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12.5" fill="#3730a3">authorize(mandate, cart)</text>
+<line x1="383" y1="288" x2="142" y2="288" stroke="#4f46e5" stroke-width="1.5" stroke-dasharray="6 5" marker-end="url(#ret)"/>
+<rect x="171" y="267" width="203" height="18" rx="4" fill="#ffffff"/>
+<text x="369" y="280" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12.5" fill="#64748b">context id — or refused, 409</text>
+<rect x="114" y="318" width="394" height="32" rx="8" fill="#f1f5f9" stroke="#e2e8f0" stroke-width="1.25"/>
+<circle cx="136" cy="334" r="10" fill="#0f172a"/>
+<text x="136" y="338" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="700" fill="#ffffff">3</text>
+<text x="154" y="338" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12.5" fill="#0f172a">wallet signs EIP-3009, nonce bound to the context</text>
+<line x1="140" y1="380" x2="381" y2="380" stroke="#4f46e5" stroke-width="1.75" marker-end="url(#acc)"/>
+<circle cx="162" cy="368" r="10" fill="#4f46e5"/>
+<text x="162" y="372" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="700" fill="#ffffff">4</text>
+<rect x="173" y="359" width="169" height="18" rx="4" fill="#ffffff"/>
+<text x="178" y="372" text-anchor="start" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12.5" fill="#3730a3">record_payment(payload)</text>
+<line x1="383" y1="426" x2="142" y2="426" stroke="#4f46e5" stroke-width="1.5" stroke-dasharray="6 5" marker-end="url(#ret)"/>
+<rect x="212" y="405" width="162" height="18" rx="4" fill="#ffffff"/>
+<text x="369" y="418" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12.5" fill="#64748b">paid — or refused, 409</text>
+<line x1="140" y1="472" x2="648" y2="472" stroke="#475569" stroke-width="1.75" marker-end="url(#arr)"/>
+<circle cx="162" cy="460" r="10" fill="#0f172a"/>
+<text x="162" y="464" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="700" fill="#ffffff">5</text>
+<rect x="173" y="451" width="203" height="18" rx="4" fill="#ffffff"/>
+<text x="178" y="464" text-anchor="start" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12.5" fill="#0f172a">retry with PAYMENT-SIGNATURE</text>
+<line x1="650" y1="518" x2="868" y2="518" stroke="#475569" stroke-width="1.75" marker-end="url(#arr)"/>
+<circle cx="672" cy="506" r="10" fill="#0f172a"/>
+<text x="672" y="510" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="700" fill="#ffffff">6</text>
+<rect x="683" y="497" width="93" height="18" rx="4" fill="#ffffff"/>
+<text x="688" y="510" text-anchor="start" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12.5" fill="#0f172a">POST /settle</text>
+<line x1="870" y1="564" x2="1068" y2="564" stroke="#475569" stroke-width="1.75" marker-end="url(#arr)"/>
+<circle cx="892" cy="552" r="10" fill="#0f172a"/>
+<text x="892" y="556" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="700" fill="#ffffff">7</text>
+<rect x="903" y="543" width="182" height="18" rx="4" fill="#ffffff"/>
+<text x="908" y="556" text-anchor="start" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12.5" fill="#0f172a">transferWithAuthorization</text>
+<line x1="1070" y1="610" x2="872" y2="610" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6 5" marker-end="url(#ret)"/>
+<rect x="1003" y="589" width="58" height="18" rx="4" fill="#ffffff"/>
+<text x="1056" y="602" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12.5" fill="#64748b">receipt</text>
+<line x1="870" y1="656" x2="652" y2="656" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6 5" marker-end="url(#ret)"/>
+<rect x="734" y="635" width="127" height="18" rx="4" fill="#ffffff"/>
+<text x="856" y="648" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12.5" fill="#64748b">settled · tx hash</text>
+<line x1="650" y1="702" x2="399" y2="702" stroke="#4f46e5" stroke-width="1.75" marker-end="url(#acc)"/>
+<circle cx="628" cy="690" r="10" fill="#4f46e5"/>
+<text x="628" y="694" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="700" fill="#ffffff">8</text>
+<rect x="428" y="681" width="189" height="18" rx="4" fill="#ffffff"/>
+<text x="612" y="694" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12.5" fill="#3730a3">record_settlement(receipt)</text>
+<line x1="397" y1="748" x2="648" y2="748" stroke="#4f46e5" stroke-width="1.5" stroke-dasharray="6 5" marker-end="url(#ret)"/>
+<rect x="406" y="727" width="224" height="18" rx="4" fill="#ffffff"/>
+<text x="411" y="740" text-anchor="start" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12.5" fill="#64748b">settled — after N confirmations</text>
+<line x1="650" y1="794" x2="399" y2="794" stroke="#4f46e5" stroke-width="1.75" marker-end="url(#acc)"/>
+<circle cx="628" cy="782" r="10" fill="#4f46e5"/>
+<text x="628" y="786" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="700" fill="#ffffff">9</text>
+<rect x="504" y="773" width="114" height="18" rx="4" fill="#ffffff"/>
+<text x="612" y="786" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12.5" fill="#3730a3">record_delivery</text>
+<line x1="650" y1="840" x2="142" y2="840" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6 5" marker-end="url(#ret)"/>
+<rect x="507" y="819" width="134" height="18" rx="4" fill="#ffffff"/>
+<text x="636" y="832" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12.5" fill="#64748b">200 · the resource</text>
+<line x1="40" y1="896" x2="1160" y2="896" stroke="#cbd5e1" stroke-width="1"/>
+<circle cx="52" cy="918" r="6" fill="#4f46e5"/>
+<text x="66" y="922" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#64748b">Calls into mandate-ledger. Any of them can refuse; every decision, refusals included, is appended to a hash chain anyone can verify.</text>
+</svg>
