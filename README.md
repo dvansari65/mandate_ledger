@@ -80,7 +80,7 @@ token it cannot forge.
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/architecture-dark.svg">
-    <img alt="Where mandate-ledger sits: a wallet grants a mandate and an agent builds a cart; both enter the ledger, which checks signature, scope and budget, then moves the payment through authorized, paid, settled and delivered. Proof goes to the rail and finality comes back; the merchant receives a settled token. Any disagreement is refused and recorded." src="docs/assets/architecture-light.svg" width="900">
+    <img alt="Where mandate-ledger sits: a wallet signs a mandate and an AI agent builds a cart; both enter the ledger, which checks signature, scope, budget, revocation, payee and nonce, then moves the payment through authorized, paid, settled and delivered. Every decision, refusals included, is appended to a hash chain verifiable offline. Proof goes to the rail, which moves the money, and finality comes back; the merchant delivers only on settled. Any disagreement is refused with a stable code and recorded." src="docs/assets/architecture-light.svg" width="900">
   </picture>
 </p>
 
