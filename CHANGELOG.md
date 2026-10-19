@@ -58,6 +58,8 @@ git; the entry below describes what that release will contain.
   is how a payer signs which purchase a payment is for.
 - `SettlementExpectation` carries the authorized amount and merchant, so a
   rail can check that evidence shows this payment and not another.
+  `PaymentExpectation` carries the payment a context already recorded, so
+  a rail that refuses stale proofs still answers a retry of that payment.
 - `ml-serve`, the engine as an HTTP service: the five calls, expiry and
   revocation, the log and the contexts, signed evidence; `200` allowed,
   `409` refused with the code, `503` could not decide; API keys compared

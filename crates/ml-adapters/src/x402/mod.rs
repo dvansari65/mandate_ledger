@@ -49,7 +49,7 @@ mod payment;
 mod rail;
 mod types;
 
-pub use assets::{Asset, AssetRegistry, BASE, BASE_SEPOLIA};
+pub use assets::{Asset, AssetRegistry, BASE, BASE_SEPOLIA, RegistryError};
 pub use cart::{ExactTerms, X402CartAdapter};
 pub use eip3009::{Authorization, binding_nonce, digest};
 pub use finality::{Log, SettlementResponse, TransactionReceipt, X402Finality};

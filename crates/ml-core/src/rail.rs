@@ -20,6 +20,12 @@ pub struct PaymentExpectation<'a> {
     pub amount: &'a Money,
     /// The authorized merchant.
     pub merchant: &'a MerchantId,
+    /// The reference of the payment this context already recorded, if it
+    /// has one. A retry presents that payment again, possibly after it
+    /// stopped being fresh: a rail that refuses stale proofs accepts this
+    /// one, so the retry gets the payment's own answer rather than a
+    /// refusal. Its signature is checked all the same.
+    pub recorded_reference: Option<&'a str>,
 }
 
 /// What a rail extracted from a valid proof.

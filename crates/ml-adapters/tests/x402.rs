@@ -127,6 +127,7 @@ mod rail {
     use serde_json::json;
     use std::num::NonZeroU32;
     use std::sync::Arc;
+    use std::time::Duration;
 
     const PAYEE: &str = "eip155:84532:0x209693bc6afc0c5328ba36faf03c514ef312287c";
     const CTX: &str = "ctx_9b16b8b344ac38c22944eed7e8b3345e";
@@ -139,7 +140,11 @@ mod rail {
         Ledger<MemoryStore, X402Rail<Arc<FixedClock>>, TrustedSigners, Arc<FixedClock>>;
 
     fn ledger() -> X402Ledger {
-        let clock = Arc::new(FixedClock::at(T0 + 60));
+        ledger_with(Arc::new(FixedClock::at(T0 + 60)))
+    }
+
+    /// The ledger and its rail on one clock, as a host wires them.
+    fn ledger_with(clock: Arc<FixedClock>) -> X402Ledger {
         let signers = TrustedSigners::new().allow(
             PrincipalId::new("user:alice").unwrap(),
             key().verifying_key().to_bytes(),
@@ -150,6 +155,7 @@ mod rail {
             FinalityPolicy {
                 confirmations: NonZeroU32::new(2).unwrap(),
                 trust_facilitator: false,
+                expiry_grace: Duration::from_secs(60),
             },
             Arc::clone(&clock),
         );
@@ -242,7 +248,7 @@ mod rail {
         assert_eq!(
             paid.reference(),
             format!(
-                "eip155:84532:0x036cbd53842c5426634e7929541ec2318f3dcf7e:{}:{NONCE}",
+                "eip155:84532:0x036cbd53842c5426634e7929541ec2318f3dcf7e:{}:{NONCE}:1800003600",
                 PAYER.to_ascii_lowercase()
             )
         );
@@ -262,6 +268,26 @@ mod rail {
         assert_eq!(
             ledger.state(auth.ctx()).unwrap(),
             Some(PaymentState::Settled)
+        );
+    }
+
+    #[test]
+    fn a_retry_after_the_authorization_expires_is_the_same_payment() {
+        let clock = Arc::new(FixedClock::at(T0 + 60));
+        let ledger = ledger_with(Arc::clone(&clock));
+        let auth = ledger
+            .authorize(&mandate(PAYEE, "USDC"), &cart(), "order-1")
+            .unwrap();
+        let paid = ledger.record_payment(&auth, &payment()).unwrap();
+        // The host retries the call after the authorization's window: it
+        // gets the payment's own answer, and nothing is written.
+        clock.set(1_800_003_600);
+        let again = ledger.record_payment(&auth, &payment()).unwrap();
+        assert_eq!(again.reference(), paid.reference());
+        assert_eq!(again.idempotency_key(), paid.idempotency_key());
+        assert_eq!(
+            ledger.evidence(auth.ctx()).unwrap().unwrap().events.len(),
+            2
         );
     }
 

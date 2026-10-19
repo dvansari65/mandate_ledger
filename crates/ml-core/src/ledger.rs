@@ -300,6 +300,7 @@ where
             cart_hash: &rec.cart_hash,
             amount: &rec.amount,
             merchant: &rec.merchant,
+            recorded_reference: rec.payment_reference.as_deref(),
         };
         let verified = match self.rail.verify_proof(proof, &expected) {
             Ok(v) => v,

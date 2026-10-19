@@ -29,27 +29,37 @@ use ml_core::{
 use std::fmt;
 use std::num::NonZeroU32;
 use std::str::FromStr;
+use std::time::Duration;
 
 /// How long before `validBefore` a payment must still have, in seconds,
 /// for a facilitator to settle it: the reference facilitator's own margin
 /// for a block to land.
 const SETTLEMENT_MARGIN_SECS: i128 = 6;
 
-/// When the rail calls a payment final.
+/// When the rail calls a payment final, or failed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FinalityPolicy {
     /// Confirmations a receipt needs, counting its own block.
     pub confirmations: NonZeroU32,
-    /// Whether the facilitator's word settles it: its success is final and
-    /// its failure is failure. Otherwise its answers are pending until a
-    /// receipt arrives.
+    /// Whether the facilitator's word settles it: its success is final,
+    /// and its failure is failure once the authorization has expired.
+    /// Otherwise its answers are pending until a receipt arrives.
     pub trust_facilitator: bool,
+    /// How long after `validBefore`, by this host's clock, a payment a
+    /// trusted facilitator failed to settle is taken as unable to settle.
+    /// The token checks `validBefore` against the chain's block time, which
+    /// can trail this clock — an L2 catching up after downtime stamps its
+    /// blocks behind real time — so the grace is the operator's bound on
+    /// how far.
+    pub expiry_grace: Duration,
 }
 
-/// One EIP-3009 authorization, the way the chain keys it: the payer's
-/// nonce on one token contract on one chain. It is the rail's payment
-/// reference and its single-use nonce, written
-/// `eip155:<chain>:<token>:<payer>:<nonce>`.
+/// One EIP-3009 authorization, the way the chain keys it — the payer's
+/// nonce on one token contract on one chain — and when it expires. Written
+/// `eip155:<chain>:<token>:<payer>:<nonce>:<validBefore>`, it is the
+/// rail's payment reference; without the expiry, it is the payment's
+/// single-use nonce, since the chain spends a nonce once whatever else the
+/// payer signed with it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AuthorizationRef {
     /// The chain.
@@ -60,12 +70,15 @@ pub struct AuthorizationRef {
     pub from: Address,
     /// The authorization's nonce.
     pub nonce: [u8; 32],
+    /// The Unix time it can be executed until, exclusive.
+    pub valid_before: u64,
 }
 
-impl fmt::Display for AuthorizationRef {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
+impl AuthorizationRef {
+    /// The authorization as the chain keys it: what a payment spends once.
+    #[must_use]
+    pub fn identity(&self) -> String {
+        format!(
             "{}:{}:{}:0x{}",
             self.chain,
             self.token,
@@ -75,20 +88,19 @@ impl fmt::Display for AuthorizationRef {
     }
 }
 
+impl fmt::Display for AuthorizationRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}", self.identity(), self.valid_before)
+    }
+}
+
 impl FromStr for AuthorizationRef {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let wrong = || format!("`{s}` is not an x402 payment reference");
-        let mut parts = s.split(':');
-        let (Some("eip155"), Some(chain), Some(token), Some(from), Some(nonce), None) = (
-            parts.next(),
-            parts.next(),
-            parts.next(),
-            parts.next(),
-            parts.next(),
-            parts.next(),
-        ) else {
+        let parts: Vec<&str> = s.split(':').collect();
+        let ["eip155", chain, token, from, nonce, valid_before] = parts[..] else {
             return Err(wrong());
         };
         let parsed = Self {
@@ -96,6 +108,7 @@ impl FromStr for AuthorizationRef {
             token: Address::parse(token).map_err(|_| wrong())?,
             from: Address::parse(from).map_err(|_| wrong())?,
             nonce: bytes("nonce", nonce).map_err(|_| wrong())?,
+            valid_before: valid_before.parse().map_err(|_| wrong())?,
         };
         // One payment, one spelling.
         if parsed.to_string() != s {
@@ -200,6 +213,20 @@ impl<C: Clock> X402Rail<C> {
                 reason: format!("the facilitator reports {reason}"),
             });
         }
+        // A failed settlement spends nothing. Whoever holds the signed
+        // authorization can still execute it until it expires, and until
+        // then the reservation it holds must stand.
+        let grace = i128::from(self.policy.expiry_grace.as_secs());
+        let now = i128::from(self.clock.now().as_secs());
+        if now < i128::from(payment.valid_before) + grace {
+            return Ok(FinalityStatus::Pending {
+                reason: format!(
+                    "the facilitator reports {reason}; the authorization can still be \
+                     settled until {} and the grace after it",
+                    payment.valid_before
+                ),
+            });
+        }
         Ok(FinalityStatus::Failed {
             reason: reason.to_owned(),
         })
@@ -296,17 +323,6 @@ impl<C: Clock> Rail for X402Rail<C> {
                 "invalid_exact_evm_payload_authorization_value_mismatch: authorization.value is not accepted.amount",
             ));
         }
-        let now = i128::from(self.clock.now().as_secs());
-        if i128::from(auth.valid_before) < now + SETTLEMENT_MARGIN_SECS {
-            return Err(invalid(
-                "invalid_exact_evm_payload_authorization_valid_before: expired, or too close to expiry to settle",
-            ));
-        }
-        if i128::from(auth.valid_after) > now {
-            return Err(invalid(
-                "invalid_exact_evm_payload_authorization_valid_after: not yet valid",
-            ));
-        }
         let signer = recover(
             &digest(terms.chain, terms.asset, &terms.token, &auth),
             &signature,
@@ -317,16 +333,33 @@ impl<C: Clock> Rail for X402Rail<C> {
                 "invalid_exact_evm_payload_signature: not signed by authorization.from",
             ));
         }
-
-        let reference = AuthorizationRef {
+        let payment = AuthorizationRef {
             chain: terms.chain,
             token: terms.asset,
             from: auth.from,
             nonce: auth.nonce,
+            valid_before: auth.valid_before,
+        };
+        let reference = payment.to_string();
+
+        // Freshness is for a payment being recorded. The one this context
+        // already recorded is answered again whenever it is presented.
+        if expected.recorded_reference != Some(reference.as_str()) {
+            let now = i128::from(self.clock.now().as_secs());
+            if i128::from(auth.valid_before) < now + SETTLEMENT_MARGIN_SECS {
+                return Err(invalid(
+                    "invalid_exact_evm_payload_authorization_valid_before: expired, or too close to expiry to settle",
+                ));
+            }
+            if i128::from(auth.valid_after) > now {
+                return Err(invalid(
+                    "invalid_exact_evm_payload_authorization_valid_after: not yet valid",
+                ));
+            }
         }
-        .to_string();
+
         Ok(VerifiedProof {
-            nonce: reference.clone(),
+            nonce: payment.identity(),
             reference,
             amount: money(auth.value, &terms.token).map_err(invalid)?,
             bound_ctx: (auth.nonce == binding_nonce(expected.ctx)).then(|| expected.ctx.clone()),
@@ -397,16 +430,23 @@ mod tests {
         ContextId::new("ctx_00112233445566778899aabbccddeeff").unwrap()
     }
 
-    fn rail(trust_facilitator: bool) -> X402Rail<FixedClock> {
+    const GRACE: u64 = 60;
+
+    fn rail_at(trust_facilitator: bool, now: i64) -> X402Rail<FixedClock> {
         X402Rail::new(
             "x402",
             AssetRegistry::base_sepolia(),
             FinalityPolicy {
                 confirmations: NonZeroU32::new(3).unwrap(),
                 trust_facilitator,
+                expiry_grace: Duration::from_secs(GRACE),
             },
-            FixedClock::at(NOW),
+            FixedClock::at(now),
         )
+    }
+
+    fn rail(trust_facilitator: bool) -> X402Rail<FixedClock> {
+        rail_at(trust_facilitator, NOW)
     }
 
     fn accepted() -> PaymentRequirements {
@@ -479,17 +519,26 @@ mod tests {
         MerchantId::new(format!("eip155:84532:{PAY_TO}")).unwrap()
     }
 
-    fn verify(proof: &PaymentPayload) -> Result<VerifiedProof, RailError> {
+    fn verify_at(
+        now: i64,
+        proof: &PaymentPayload,
+        recorded: Option<&str>,
+    ) -> Result<VerifiedProof, RailError> {
         let (ctx, amount, merchant) = (ctx(), amount(), merchant());
-        rail(true).verify_proof(
+        rail_at(true, now).verify_proof(
             proof,
             &PaymentExpectation {
                 ctx: &ctx,
                 cart_hash: &Hash32::ZERO,
                 amount: &amount,
                 merchant: &merchant,
+                recorded_reference: recorded,
             },
         )
+    }
+
+    fn verify(proof: &PaymentPayload) -> Result<VerifiedProof, RailError> {
+        verify_at(NOW, proof, None)
     }
 
     fn refused(proof: &PaymentPayload) -> String {
@@ -499,21 +548,31 @@ mod tests {
         }
     }
 
-    fn reference() -> String {
+    fn payment_ref() -> AuthorizationRef {
         AuthorizationRef {
             chain: BASE_SEPOLIA,
             token: address(USDC),
             from: address_of(&key()),
             nonce: binding_nonce(&ctx()),
+            valid_before: authorization().valid_before,
         }
-        .to_string()
+    }
+
+    fn reference() -> String {
+        payment_ref().to_string()
     }
 
     #[test]
     fn a_bound_payment_reports_what_it_proves() {
         let verified = verify(&signed(&authorization())).unwrap();
         assert_eq!(verified.reference, reference());
-        assert_eq!(verified.nonce, verified.reference);
+        // The nonce the store spends once is the authorization alone: the
+        // chain executes a payer's nonce once, whatever expiry it carried.
+        assert_eq!(verified.nonce, payment_ref().identity());
+        assert_eq!(
+            verified.reference,
+            format!("{}:{}", verified.nonce, NOW + 60)
+        );
         assert_eq!(verified.amount, amount());
         assert_eq!(verified.amount.to_string(), "0.010000 USDC");
         assert_eq!(verified.bound_ctx, Some(ctx()));
@@ -581,6 +640,32 @@ mod tests {
     }
 
     #[test]
+    fn the_recorded_payment_is_answered_again_after_it_expires() {
+        let proof = signed(&authorization());
+        let later = NOW + 3_600;
+        // Fresh, it is refused once expired...
+        assert!(matches!(
+            verify_at(later, &proof, None),
+            Err(RailError::InvalidProof(why)) if why.contains("valid_before")
+        ));
+        // ...but the payment this context recorded is the same payment
+        // whenever it is presented.
+        let reference = reference();
+        let verified = verify_at(later, &proof, Some(&reference)).unwrap();
+        assert_eq!(verified.reference, reference);
+        // A different payment gets no such pass.
+        let other = signed(&Authorization {
+            nonce: [9; 32],
+            ..authorization()
+        });
+        assert!(verify_at(later, &other, Some(&reference)).is_err());
+        // And the signature is checked all the same.
+        let mut forged = proof.clone();
+        forged.payload.signature = format!("0x{}", hex::encode([1u8; 65]));
+        assert!(verify_at(later, &forged, Some(&reference)).is_err());
+    }
+
+    #[test]
     fn the_window_edges_are_the_facilitators() {
         let at_margin = Authorization {
             valid_before: u64::try_from(NOW + 6).unwrap(),
@@ -599,6 +684,9 @@ mod tests {
             r.to_uppercase(),
             r.replace("eip155:", "eip155:0"),
             format!("{r}:x"),
+            // A second spelling of the same expiry.
+            r.replace(&format!(":{}", NOW + 60), &format!(":0{}", NOW + 60)),
+            payment_ref().identity(),
             String::new(),
         ] {
             assert!(bad.parse::<AuthorizationRef>().is_err(), "{bad}");
@@ -646,8 +734,29 @@ mod tests {
                 reference: TX.to_ascii_lowercase()
             }
         );
+        // Its failure stands only once the authorization can no longer
+        // execute: past validBefore, and the grace after it.
+        let expires = NOW + 60;
+        let grace = i64::try_from(GRACE).unwrap();
+        for now in [NOW, expires, expires + grace - 1] {
+            assert!(
+                matches!(
+                    settle(
+                        &rail_at(true, now),
+                        &response(false, Some("insufficient_funds"))
+                    )
+                    .unwrap(),
+                    FinalityStatus::Pending { .. }
+                ),
+                "at {now}"
+            );
+        }
         assert_eq!(
-            settle(&trusted, &response(false, Some("insufficient_funds"))).unwrap(),
+            settle(
+                &rail_at(true, expires + grace),
+                &response(false, Some("insufficient_funds"))
+            )
+            .unwrap(),
             FinalityStatus::Failed {
                 reason: "insufficient_funds".to_owned()
             }
