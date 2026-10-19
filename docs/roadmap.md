@@ -55,8 +55,14 @@ mandate, the cart, the proof and the finality disagree, and records why.
 ### 5. The first real adapter: x402
 - [x] 402 terms → cart (`payTo` as the merchant, so §2's payee binding first):
       `X402CartAdapter` and the asset registry, pinned to x402 v2
-- [ ] Signed payment payload → proof (its nonce, the terms hash, `payTo`)
-- [ ] Chain receipt → finality; one rail id per network
+- [x] Signed payment payload → proof: `X402Rail` verifies the EIP-3009
+      signature offline under the token's rules; the payee, the amount and
+      the binding nonce are what it reports
+- [x] Chain receipt → finality, or the facilitator's answer when trusted
+- [ ] Failure without a trusted facilitator: `authorizationState` after
+      `validBefore`
+- [ ] `ml-serve` and `ml` on the x402 rail: `ML_RAIL=x402`, `ml x402`
+      commands to build payloads in the sandbox
 - [ ] The eight scenarios through x402 payloads, plus spec test vectors
 - Decisions: facilitator or direct chain verification; first network
 

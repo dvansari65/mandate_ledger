@@ -24,6 +24,12 @@ impl Address {
         &self.0
     }
 
+    /// From raw bytes.
+    #[must_use]
+    pub const fn from_bytes(bytes: [u8; 20]) -> Self {
+        Self(bytes)
+    }
+
     /// Parse, saying why not when it is not an address.
     pub(super) fn parse(s: &str) -> Result<Self, &'static str> {
         let hex = s
