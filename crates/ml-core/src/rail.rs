@@ -20,6 +20,12 @@ pub struct PaymentExpectation<'a> {
     pub amount: &'a Money,
     /// The authorized merchant.
     pub merchant: &'a MerchantId,
+    /// The reference of the payment this context already recorded, if it
+    /// has one. A retry presents that payment again, possibly after it
+    /// stopped being fresh: a rail that refuses stale proofs accepts this
+    /// one, so the retry gets the payment's own answer rather than a
+    /// refusal. Its signature is checked all the same.
+    pub recorded_reference: Option<&'a str>,
 }
 
 /// What a rail extracted from a valid proof.
@@ -53,12 +59,19 @@ pub struct VerifiedProof {
 }
 
 /// What the engine recorded at payment, handed to the rail for finality.
+/// A rail whose evidence shows what moved — a receipt's transfer events —
+/// checks it against `amount` and `merchant`, so evidence of some other
+/// payment from the same payer is not taken for this one.
 #[derive(Clone, Copy, Debug)]
 pub struct SettlementExpectation<'a> {
     /// The context awaiting settlement.
     pub ctx: &'a ContextId,
     /// The payment reference recorded at `record_payment`.
     pub payment_reference: &'a str,
+    /// The authorized amount.
+    pub amount: &'a Money,
+    /// The authorized merchant.
+    pub merchant: &'a MerchantId,
 }
 
 /// Whether a payment has reached finality.

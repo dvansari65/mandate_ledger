@@ -11,8 +11,8 @@
 //!   answering from the payment reference. For sandboxes; never for
 //!   production.
 //! - [`x402`] — the x402 v2 protocol: a cart from a 402's payment
-//!   requirements, priced through a registry of known assets. The rail is
-//!   next.
+//!   requirements, priced through a registry of known assets, and a rail
+//!   that verifies EIP-3009 payments offline and judges their settlement.
 //!
 //! AP2, ACP and MPP will live here as they land, one module each.
 
@@ -27,4 +27,4 @@ pub mod x402;
 pub use mock::{MockFinality, MockProof, MockRail};
 pub use native::{NativeAttestation, NativeCart, NativeCartAdapter};
 pub use sandbox::SandboxRail;
-pub use x402::X402CartAdapter;
+pub use x402::{X402CartAdapter, X402Rail};

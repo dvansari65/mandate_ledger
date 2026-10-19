@@ -1,4 +1,4 @@
-//! The x402 protocol, version 2: the cart.
+//! The x402 protocol, version 2: the cart, the payment, and settlement.
 //!
 //! An x402 purchase starts with a `402 Payment Required` carrying a
 //! `PaymentRequired` object: what is being sold (`resource`) and the ways to
@@ -42,8 +42,17 @@
 
 mod assets;
 mod cart;
+mod eip3009;
+mod fields;
+mod finality;
+mod payment;
+mod rail;
 mod types;
 
-pub use assets::{Asset, AssetRegistry, BASE, BASE_SEPOLIA};
+pub use assets::{Asset, AssetRegistry, BASE, BASE_SEPOLIA, RegistryError};
 pub use cart::{ExactTerms, X402CartAdapter};
+pub use eip3009::{Authorization, binding_nonce, digest};
+pub use finality::{Log, SettlementResponse, TransactionReceipt, X402Finality};
+pub use payment::{AuthorizationBody, ExactEvmPayload, PaymentPayload};
+pub use rail::{AuthorizationRef, FinalityPolicy, X402Rail};
 pub use types::{Address, ChainId, PaymentRequirements, ResourceInfo, X402Cart, account_id};

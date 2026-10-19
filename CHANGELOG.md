@@ -48,6 +48,18 @@ git; the entry below describes what that release will contain.
   the amount is exact in the token's decimals; addresses are checked
   against their EIP-55 checksum; and anything the adapter does not price
   is refused before the engine sees it.
+- `X402Rail`: an x402 v2 payment verified offline — the EIP-3009
+  signature recovered under the token contract's own rules, the window and
+  the payee checked as the reference facilitator checks them — reporting
+  the signed payee, amount and binding nonce for the engine to compare;
+  settlement judged from a receipt that must show this authorization and
+  this transfer, or from the facilitator's answer when the operator trusts
+  it. The binding nonce, `keccak256("mandate-ledger:x402-nonce:v1:" ‖ ctx)`,
+  is how a payer signs which purchase a payment is for.
+- `SettlementExpectation` carries the authorized amount and merchant, so a
+  rail can check that evidence shows this payment and not another.
+  `PaymentExpectation` carries the payment a context already recorded, so
+  a rail that refuses stale proofs still answers a retry of that payment.
 - `ml-serve`, the engine as an HTTP service: the five calls, expiry and
   revocation, the log and the contexts, signed evidence; `200` allowed,
   `409` refused with the code, `503` could not decide; API keys compared

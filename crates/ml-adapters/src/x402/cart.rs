@@ -1,15 +1,13 @@
 //! From an x402 cart document to a [`Cart`].
 
 use super::assets::{Asset, AssetRegistry};
+use super::fields::{address, malformed, money, uint, unsupported};
 use super::types::{Address, ChainId, PaymentRequirements, ResourceInfo, X402Cart, account_id};
 use ml_core::{
     AdapterError, Attestation, Cart, CartAdapter, MerchantId, Money, ScopeClaims, canonical_json,
 };
-use rust_decimal::Decimal;
 use serde::Deserialize as _;
 
-/// The most digits a `uint256` has.
-const MAX_AMOUNT_DIGITS: usize = 78;
 /// The longest icon URL, in UTF-16 code units, as the reference schema
 /// bounds it.
 const MAX_ICON_URL_LEN: usize = 2048;
@@ -42,14 +40,6 @@ pub struct ExactTerms {
 #[derive(Clone, Debug)]
 pub struct X402CartAdapter {
     registry: AssetRegistry,
-}
-
-fn malformed(what: &str) -> AdapterError {
-    AdapterError::Malformed(what.to_owned())
-}
-
-fn unsupported(what: &str) -> AdapterError {
-    AdapterError::Unsupported(what.to_owned())
 }
 
 /// A service name or a tag: 1 to 32 printable ASCII characters.
@@ -87,44 +77,6 @@ fn resource(info: &ResourceInfo) -> Result<(), AdapterError> {
         }
     }
     Ok(())
-}
-
-/// An address field. Something that is not even trying to be an EVM
-/// address — a role constant such as `merchant`, a fiat code — is valid
-/// x402 this adapter does not support; a broken one is malformed.
-fn address(field: &str, value: &str) -> Result<Address, AdapterError> {
-    if !value.starts_with("0x") {
-        return Err(unsupported(&format!("{field}: only an EVM address")));
-    }
-    Address::parse(value).map_err(|why| malformed(&format!("{field}: {why}")))
-}
-
-/// The amount in atomic units: a whole decimal number written canonically
-/// — `0`, or no leading zero, so one amount has one spelling and one hash —
-/// of at most 78 digits, the range of a `uint256`, within what this
-/// adapter prices.
-fn atomic_amount(amount: &str) -> Result<u128, AdapterError> {
-    let canonical = !amount.is_empty()
-        && amount.len() <= MAX_AMOUNT_DIGITS
-        && amount.bytes().all(|b| b.is_ascii_digit())
-        && (amount == "0" || !amount.starts_with('0'));
-    if !canonical {
-        return Err(malformed(
-            "amount: a whole number of atomic units, without leading zeros",
-        ));
-    }
-    amount
-        .parse()
-        .map_err(|_| unsupported("amount: beyond the range this adapter prices"))
-}
-
-/// Atomic units into money, exactly: the token's decimals become the scale.
-fn money(atomic: u128, token: &Asset) -> Result<Money, AdapterError> {
-    let units = i128::try_from(atomic)
-        .ok()
-        .and_then(|units| Decimal::try_from_i128_with_scale(units, u32::from(token.decimals)).ok())
-        .ok_or_else(|| unsupported("amount: beyond the range this adapter prices"))?;
-    Ok(Money::new(units, token.symbol.clone()))
 }
 
 /// The `extra` object of an `exact` EVM requirement: the default transfer
@@ -166,6 +118,12 @@ impl X402CartAdapter {
         Self { registry }
     }
 
+    /// The tokens it prices.
+    #[must_use]
+    pub fn registry(&self) -> &AssetRegistry {
+        &self.registry
+    }
+
     /// Check a requirement and read it as [`ExactTerms`], refusing anything
     /// this adapter does not price exactly as the merchant meant it.
     pub fn terms(&self, accepted: &PaymentRequirements) -> Result<ExactTerms, AdapterError> {
@@ -187,7 +145,7 @@ impl X402CartAdapter {
         if pay_to == asset {
             return Err(malformed("payTo: the token contract itself"));
         }
-        let atomic = atomic_amount(&accepted.amount)?;
+        let atomic = uint("amount", &accepted.amount)?;
         let total = money(atomic, &token)?;
         if accepted.max_timeout_seconds == 0 {
             return Err(malformed("maxTimeoutSeconds: at least 1"));
